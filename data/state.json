@@ -1,0 +1,173 @@
+{
+  "tasks": [
+    {
+      "id": "TK-20261004-0021",
+      "name": "设备 #3021 故障诊断",
+      "pack_id": "after-sales",
+      "skill_id": "equipment-diagnosis",
+      "status": "running",
+      "status_label": "进行中",
+      "updated": "2 分钟前",
+      "copy": "已找到 3 条相关历史案例，建议检查冷却泵电源和过滤器状态。",
+      "tenant_id": "tenant-demo",
+      "created_by": "user-wu-yuhang",
+      "input_snapshot": "设备 #3021 故障诊断"
+    },
+    {
+      "id": "TK-20261004-0018",
+      "name": "RemoteHelpDesk #1842",
+      "pack_id": "engineering",
+      "skill_id": "issue-investigation",
+      "status": "review",
+      "status_label": "待确认",
+      "updated": "12 分钟前",
+      "copy": "已整理代码上下文和复现路径，建议先确认 API 兼容性，再进入修改计划。",
+      "tenant_id": "tenant-demo",
+      "created_by": "user-wu-yuhang",
+      "input_snapshot": "RemoteHelpDesk #1842"
+    },
+    {
+      "id": "TK-20261004-0016",
+      "name": "支付服务 P95 延迟",
+      "pack_id": "operations",
+      "skill_id": "alert-triage",
+      "status": "approval",
+      "status_label": "需审批",
+      "updated": "31 分钟前",
+      "copy": "已聚合 4 条重复告警，影响支付 API。建议按照支付服务 Runbook 升级值班负责人。",
+      "tenant_id": "tenant-demo",
+      "created_by": "user-wu-yuhang",
+      "input_snapshot": "支付服务 P95 延迟"
+    },
+    {
+      "id": "TK-20261003-0091",
+      "name": "Q3 设备巡检报告",
+      "pack_id": "after-sales",
+      "skill_id": "equipment-diagnosis",
+      "status": "completed",
+      "status_label": "已完成",
+      "updated": "昨天",
+      "copy": "巡检报告已生成，包含设备状态摘要和 12 条证据引用。",
+      "tenant_id": "tenant-demo",
+      "created_by": "user-wu-yuhang",
+      "input_snapshot": "Q3 设备巡检报告"
+    }
+  ],
+  "runs": [
+    {
+      "id": "run-1001",
+      "task_id": "TK-20261004-0021",
+      "skill_id": "equipment-diagnosis",
+      "status": "running",
+      "duration": "18.4s",
+      "message": "3 个引用",
+      "created_at": "2026-10-03T16:31:48.184225+00:00",
+      "tenant_id": "tenant-demo",
+      "actor_id": "user-wu-yuhang"
+    },
+    {
+      "id": "run-1000",
+      "task_id": "TK-20261004-0018",
+      "skill_id": "issue-investigation",
+      "status": "running",
+      "duration": "",
+      "message": "6 个工具调用",
+      "created_at": "2026-10-03T16:31:48.184351+00:00",
+      "tenant_id": "tenant-demo",
+      "actor_id": "user-wu-yuhang"
+    },
+    {
+      "id": "run-0999",
+      "task_id": "TK-20261004-0016",
+      "skill_id": "alert-triage",
+      "status": "approval",
+      "duration": "",
+      "message": "影响范围分析",
+      "created_at": "2026-10-03T16:31:48.184354+00:00",
+      "tenant_id": "tenant-demo",
+      "actor_id": "user-wu-yuhang"
+    }
+  ],
+  "approvals": [
+    {
+      "id": "TK-20261004-0016",
+      "task_id": "TK-20261004-0016",
+      "status": "pending",
+      "reason": "升级运营告警"
+    }
+  ],
+  "artifacts": {
+    "TK-20261004-0021": [
+      {
+        "name": "DiagnosisReport.json",
+        "type": "json",
+        "description": "结构化诊断结果 · 24 KB",
+        "tenant_id": "tenant-demo"
+      },
+      {
+        "name": "evidence-bundle.md",
+        "type": "evidence",
+        "description": "3 条引用 · 8 KB",
+        "tenant_id": "tenant-demo"
+      }
+    ]
+  },
+  "knowledge": [
+    {
+      "id": "product-manuals",
+      "name": "产品手册",
+      "pack_id": "after-sales",
+      "documents": 128,
+      "status": "ready",
+      "updated": "今天 09:24"
+    },
+    {
+      "id": "historical-tickets",
+      "name": "历史工单",
+      "pack_id": "after-sales",
+      "documents": 3842,
+      "status": "ready",
+      "updated": "昨天 18:42"
+    },
+    {
+      "id": "repository-docs",
+      "name": "Repository Docs",
+      "pack_id": "engineering",
+      "documents": 86,
+      "status": "indexing",
+      "updated": "12 分钟前"
+    },
+    {
+      "id": "runbooks",
+      "name": "Service Runbooks",
+      "pack_id": "operations",
+      "documents": 42,
+      "status": "ready",
+      "updated": "3 天前"
+    }
+  ],
+  "workflows": [
+    {
+      "id": "diagnose-equipment-v2",
+      "name": "售后诊断 v2",
+      "pack_id": "after-sales",
+      "steps": 5,
+      "status": "published"
+    },
+    {
+      "id": "issue-to-patch-plan",
+      "name": "Issue to Patch Plan",
+      "pack_id": "engineering",
+      "steps": 4,
+      "status": "published"
+    },
+    {
+      "id": "alert-to-escalation",
+      "name": "Alert to Escalation",
+      "pack_id": "operations",
+      "steps": 4,
+      "status": "published"
+    }
+  ],
+  "audit": []
+}

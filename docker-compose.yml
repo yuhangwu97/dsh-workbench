@@ -1,0 +1,20 @@
+services:
+  dsh-workbench:
+    build: .
+    ports:
+      - "8766:8766"
+    environment:
+      WORKBENCH_AUTH_TOKEN: ${WORKBENCH_AUTH_TOKEN:-}
+      DSH_ENDPOINT: ${DSH_ENDPOINT:-}
+      WORKBENCH_STORAGE: ${WORKBENCH_STORAGE:-sqlite}
+    volumes:
+      - workbench-data:/app/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8766/api/v1/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  workbench-data:

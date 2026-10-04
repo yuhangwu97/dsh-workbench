@@ -19,3 +19,14 @@ completed = client.runs.wait(run.id)
 ```
 
 Run controls are available through `client.runs.cancel(run_id)`, `client.runs.retry(run_id)`, and `client.runs.queue()`. Scenario Packs and org access are available through `client.scenario_packs` and `client.organization`. Search responses include `citations` and `citation_id` values that can be attached to an Artifact.
+
+## Native DeepSeek Harness runtime
+
+The Workbench API can execute real tasks through the optional official Harness SDK. Install the server extra and configure an isolated home/profile; the SDK client above still calls the Workbench product API.
+
+```bash
+python -m pip install "dsh-workbench[harness]"
+export DSH_RUNTIME_MODE=native
+export DSH_HARNESS_HOME=/absolute/path/to/workbench-dsh-home
+export DSH_HARNESS_PROFILE=workbench-readonly
+```

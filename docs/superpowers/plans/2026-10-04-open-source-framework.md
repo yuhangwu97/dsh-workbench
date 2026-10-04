@@ -141,8 +141,8 @@
 - 修改：`docs/superpowers/specs/2026-10-04-open-source-framework-design.md`（如发现规格缺口）
 - 修改：`docs/superpowers/plans/2026-10-04-open-source-framework.md`（更新复选框）
 
-- [ ] 启动参考服务，运行 SDK 到 API 的端到端链路：create Task → run → wait → list Artifact。
-- [ ] 运行跨租户拒绝、HMAC callback、幂等创建、Docker health/ready 验证。
-- [ ] 检查 `git diff --check`、仓库状态和构建产物。
-- [ ] 将最终提交推送到 `https://github.com/yuhangwu97/dsh-workbench.git` 的 `main`。
-- [ ] 在 README 和最终回复中明确当前参考服务能力与生产替换边界。
+- [x] 启动参考服务，运行 SDK 到 API 的端到端链路：create Task → run → wait → list Artifact。
+- [x] 运行跨租户拒绝、HMAC callback、幂等创建、Docker health/ready 验证。
+- [x] 检查 `git diff --check`、仓库状态和构建产物。
+- [x] 将最终提交推送到 `https://github.com/yuhangwu97/dsh-workbench.git` 的 `main`。
+- [x] 在 README 和最终回复中明确当前参考服务能力与生产替换边界。

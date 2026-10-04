@@ -16,6 +16,7 @@ tags:
   - name: Workflows
   - name: Approvals
   - name: Artifacts
+  - name: Events
   - name: Chat
 paths:
   /api/v1/health:
@@ -189,6 +190,7 @@ paths:
         - {$ref: '#/components/parameters/RequestId'}
         - {$ref: '#/components/parameters/CallbackTimestamp'}
         - {$ref: '#/components/parameters/CallbackSignature'}
+        - {$ref: '#/components/parameters/CallbackNonce'}
       requestBody:
         required: true
         content:
@@ -431,6 +433,18 @@ paths:
         '200':
           description: Rejection result
           content: {application/json: {schema: {type: object}}}
+  /api/v1/events:
+    get:
+      tags: [Events]
+      operationId: listEvents
+      parameters:
+        - {$ref: '#/components/parameters/PageSize'}
+        - {$ref: '#/components/parameters/PageToken'}
+      responses:
+        '200':
+          description: Harness and product events
+          content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/Event'}}}}
+
   /api/v1/artifacts:
     get:
       tags: [Artifacts]
@@ -456,6 +470,7 @@ components:
     Idempotency-Key: {name: Idempotency-Key, in: header, required: false, schema: {type: string, maxLength: 200}}
     CallbackTimestamp: {name: X-DSH-Timestamp, in: header, required: false, schema: {type: string}}
     CallbackSignature: {name: X-DSH-Signature, in: header, required: false, schema: {type: string}}
+    CallbackNonce: {name: X-DSH-Nonce, in: header, required: false, schema: {type: string}}
     PageSize: {name: page_size, in: query, required: false, schema: {type: integer, minimum: 1, maximum: 100}}
     PageToken: {name: page_token, in: query, required: false, schema: {type: string}}
   schemas:

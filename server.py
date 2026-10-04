@@ -14,9 +14,11 @@ import uuid
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from typing import Any
 from urllib.parse import parse_qs, urlparse
 
-from runtime.dsh_runtime import DshRuntime
+from runtime.dsh_harness import HarnessResult
+from runtime.dsh_runtime import DshRuntime, RuntimeUnavailableError
 from runtime.knowledge import KnowledgeIndex
 from runtime.security import roles_from_claims, verify_hs256
 from tools_evaluate_packs import evaluate as evaluate_pack_manifest
@@ -32,6 +34,7 @@ DEMO_ACTOR_ID = "user-wu-yuhang"
 AUTH_TOKEN = os.getenv("WORKBENCH_AUTH_TOKEN", "").strip()
 DSH_CALLBACK_SECRET = os.getenv("DSH_CALLBACK_SECRET", "").strip()
 CALLBACK_MAX_SKEW = int(os.getenv("DSH_CALLBACK_MAX_SKEW", "300"))
+CALLBACK_NONCES: set[str] = set()
 JWT_SECRET = os.getenv("WORKBENCH_JWT_SECRET", "").strip()
 OIDC_ISSUER = os.getenv("WORKBENCH_OIDC_ISSUER", "").strip()
 MAX_CONCURRENCY = max(1, int(os.getenv("WORKBENCH_MAX_CONCURRENCY", "4")))
@@ -103,6 +106,7 @@ def seed_state() -> dict:
         "citations": [],
         "org_members": [{"id": DEMO_ACTOR_ID, "email": "yuhang@example.com", "role": "owner", "status": "active"}],
         "pack_evaluations": [],
+        "events": [],
         "pack_registry": load_registry(),
         "workflows": [
             {"id": "diagnose-equipment-v2", "name": "售后诊断 v2", "pack_id": "after-sales", "steps": 5, "status": "published"},
@@ -146,7 +150,7 @@ def load_state() -> dict:
     try:
         seed = seed_state()
         changed = False
-        for key in ("knowledge", "knowledge_documents", "knowledge_chunks", "citations", "org_members", "pack_evaluations", "pack_registry", "workflows"):
+        for key in ("knowledge", "knowledge_documents", "knowledge_chunks", "citations", "org_members", "pack_evaluations", "events", "pack_registry", "workflows"):
             if key not in state:
                 state[key] = seed[key]
                 changed = True
@@ -235,6 +239,92 @@ def record_audit(state: dict, *, tenant_id: str, actor_id: str, action: str, res
         "metadata": metadata or {},
         "created_at": now_iso(),
     })
+
+def apply_harness_result(state: dict, run: dict, task: dict | None, result: HarnessResult) -> None:
+    """Map a native Harness result into product-owned Run, Event and Artifact records."""
+    run["status"] = result.status
+    run["dsh_session_id"] = result.session_id
+    run.setdefault("runtime", {}).update({
+        "mode": "native",
+        "runtime": "dsh-harness",
+        "dsh_session_id": result.session_id,
+        "finish_reason": result.finish_reason,
+        "event_count": len(result.events),
+    })
+    run["finished_at"] = now_iso()
+    if result.status == "completed":
+        run["message"] = "DSH Harness 已完成，结果已保存为 Artifact"
+    elif result.status == "cancelled":
+        run["message"] = "DSH Harness 运行已取消"
+    else:
+        run["message"] = (result.error or "DSH Harness 运行失败")[:500]
+
+    events = state.setdefault("events", [])
+    for item in result.events[:100]:
+        if not isinstance(item, dict):
+            continue
+        event = {
+            "id": f"event-{uuid.uuid4().hex[:10]}",
+            "type": str(item.get("type", "harness/event"))[:120],
+            "resource_type": "run",
+            "resource_id": run["id"],
+            "tenant_id": run.get("tenant_id", DEMO_TENANT_ID),
+            "actor_id": run.get("actor_id", DEMO_ACTOR_ID),
+            "data": item,
+            "created_at": now_iso(),
+        }
+        events.insert(0, event)
+
+    if task is None:
+        record_audit(state, tenant_id=run.get("tenant_id", DEMO_TENANT_ID), actor_id=run.get("actor_id", DEMO_ACTOR_ID), action=f"run.{result.status}", resource_type="run", resource_id=run["id"], metadata={"session_id": result.session_id, "finish_reason": result.finish_reason})
+        return
+
+    if result.status == "completed":
+        task["status"] = "completed"
+        task["status_label"] = "已完成"
+        task["updated"] = "刚刚"
+        task["copy"] = "DSH Harness 已生成结构化结果，结果和执行轨迹已保存。"
+        artifacts = state.setdefault("artifacts", {}).setdefault(task["id"], [])
+        artifacts.extend([
+            {
+                "name": "harness-result.json",
+                "type": "json",
+                "description": "DSH Harness 结构化结果",
+                "content": result.final_response[:100000],
+                "run_id": run["id"],
+                "tenant_id": run.get("tenant_id", DEMO_TENANT_ID),
+            },
+            {
+                "name": "harness-events.jsonl",
+                "type": "trace",
+                "description": f"{len(result.events)} 条 Harness 事件",
+                "content": "\n".join(json.dumps(item, ensure_ascii=False, default=str) for item in result.events[:100])[:200000],
+                "run_id": run["id"],
+                "tenant_id": run.get("tenant_id", DEMO_TENANT_ID),
+            },
+        ])
+    elif result.status == "cancelled":
+        task["status"] = "cancelled"
+        task["status_label"] = "已取消"
+    else:
+        task["status"] = "failed"
+        task["status_label"] = "失败"
+    record_audit(state, tenant_id=run.get("tenant_id", DEMO_TENANT_ID), actor_id=run.get("actor_id", DEMO_ACTOR_ID), action=f"run.{result.status}", resource_type="run", resource_id=run["id"], metadata={"task_id": task["id"], "session_id": result.session_id, "finish_reason": result.finish_reason})
+
+def build_task_runtime_request(state: dict, task: dict, *, tenant_id: str, actor_id: str, input_value: Any, approval_required: bool = False):
+    knowledge_scope = [item["id"] for item in state["knowledge"] if item.get("pack_id") == task["pack_id"]]
+    skill = skill_for(task["skill_id"])
+    return DSH_RUNTIME.build_request(
+        tenant_id=tenant_id,
+        actor_id=actor_id,
+        task_id=task["id"],
+        skill_id=task["skill_id"],
+        input=input_value,
+        knowledge_scope=knowledge_scope,
+        allowed_tools=skill.get("dependencies", []),
+        output_schema="task.result.v1",
+        approval_required=approval_required,
+    )
 
 def schedule_local_run(run_id: str, *, task_id: str | None = None, workflow_id: str | None = None) -> None:
     """Advance a demo run with bounded concurrency and cancellation checks."""
@@ -333,6 +423,43 @@ def schedule_local_run(run_id: str, *, task_id: str | None = None, workflow_id: 
 
     threading.Thread(target=worker, name=f"dsh-run-{run_id}", daemon=True).start()
 
+def schedule_harness_run(run_id: str, request, *, task_id: str | None = None, workflow_id: str | None = None) -> None:
+    """Execute one native Harness run and persist its product-owned result."""
+    def worker() -> None:
+        with RUN_SEMAPHORE:
+            with LOCK:
+                state = load_state()
+                run = next((item for item in state["runs"] if item["id"] == run_id), None)
+                if not run or run.get("cancel_requested"):
+                    return
+                run["status"] = "running"
+                run["started_at"] = now_iso()
+                run.setdefault("runtime", {}).update({"mode": "native", "runtime": "dsh-harness", "dsh_session_id": run_id})
+                task = next((item for item in state["tasks"] if item["id"] == task_id), None) if task_id else None
+                if task:
+                    task["status"] = "running"
+                    task["status_label"] = "进行中"
+                    task["updated"] = "刚刚"
+                save_state(state)
+            try:
+                result = DSH_RUNTIME.dispatch(request, run_id=run_id)
+            except Exception as exc:
+                result = HarnessResult(status="failed", session_id=run_id, final_response="", finish_reason="error", error=str(exc))
+            if not isinstance(result, HarnessResult):
+                return
+            with LOCK:
+                state = load_state()
+                run = next((item for item in state["runs"] if item["id"] == run_id), None)
+                if not run or int(run.get("attempt", 1)) != int(getattr(request, "attempt", run.get("attempt", 1))):
+                    # A retry may have replaced this attempt while the worker was running.
+                    if not run:
+                        return
+                task = next((item for item in state["tasks"] if item["id"] == task_id), None) if task_id else None
+                apply_harness_result(state, run, task, result)
+                save_state(state)
+
+    threading.Thread(target=worker, name=f"dsh-harness-{run_id}", daemon=True).start()
+
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
@@ -386,9 +513,19 @@ class Handler(BaseHTTPRequestHandler):
             return False
         if abs(int(datetime.now(timezone.utc).timestamp()) - timestamp_value) > CALLBACK_MAX_SKEW:
             return False
-        expected = hmac.new(DSH_CALLBACK_SECRET.encode("utf-8"), f"{timestamp}.".encode("utf-8") + getattr(self, "raw_body", b""), hashlib.sha256).hexdigest()
         supplied = signature.removeprefix("sha256=")
-        return bool(supplied) and hmac.compare_digest(supplied, expected)
+        nonce = self.headers.get("X-DSH-Nonce", "").strip()[:200]
+        prefix = f"{timestamp}.{nonce}." if nonce else f"{timestamp}."
+        expected = hmac.new(DSH_CALLBACK_SECRET.encode("utf-8"), prefix.encode("utf-8") + getattr(self, "raw_body", b""), hashlib.sha256).hexdigest()
+        valid = bool(supplied) and hmac.compare_digest(supplied, expected)
+        if valid and nonce:
+            with LOCK:
+                if nonce in CALLBACK_NONCES:
+                    return False
+                CALLBACK_NONCES.add(nonce)
+                if len(CALLBACK_NONCES) > 10000:
+                    CALLBACK_NONCES.clear()
+        return valid
 
     def paginated(self, items: list[dict]) -> list[dict] | dict | None:
         query = getattr(self, "query", {})
@@ -419,7 +556,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(204)
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Tenant-ID, X-Actor-ID, X-Request-ID, Idempotency-Key, X-DSH-Timestamp, X-DSH-Signature")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Tenant-ID, X-Actor-ID, X-Request-ID, Idempotency-Key, X-DSH-Timestamp, X-DSH-Signature, X-DSH-Nonce")
         self.send_header("Content-Length", "0")
         self.end_headers()
 
@@ -562,6 +699,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json([approval for approval in state["approvals"] if approval.get("task_id") in visible_task_ids])
             elif path == "/api/v1/audit":
                 self.send_json([entry for entry in state.get("audit", []) if entry.get("tenant_id", DEMO_TENANT_ID) == tenant_id])
+            elif path == "/api/v1/events":
+                self.send_json([event for event in state.get("events", []) if event.get("tenant_id", DEMO_TENANT_ID) == tenant_id])
             elif path == "/api/v1/artifacts":
                 page = self.paginated([artifact | {"task_id": task_id} for task_id, artifacts in state["artifacts"].items() if task_id in visible_task_ids for artifact in artifacts])
                 if page is not None:
@@ -726,6 +865,7 @@ class Handler(BaseHTTPRequestHandler):
                     task["status_label"] = "已取消"
                 record_audit(state, tenant_id=tenant_id, actor_id=actor_id, action="run.cancel_requested", resource_type="run", resource_id=run_id, metadata={"task_id": run.get("task_id")})
                 save_state(state)
+                DSH_RUNTIME.cancel(run_id)
                 self.send_json(run)
             elif path.startswith("/api/v1/runs/") and path.endswith("/retry"):
                 if not self.require_role("owner", "admin", "editor", "operator"):
@@ -753,7 +893,12 @@ class Handler(BaseHTTPRequestHandler):
                     task["status_label"] = "待运行"
                 record_audit(state, tenant_id=tenant_id, actor_id=actor_id, action="run.retried", resource_type="run", resource_id=run_id, metadata={"attempt": run["attempt"], "task_id": task_id})
                 save_state(state)
-                schedule_local_run(run_id, task_id=task_id, workflow_id=run.get("workflow_id"))
+                if task_id and task:
+                    retry_request = build_task_runtime_request(state, task, tenant_id=tenant_id, actor_id=actor_id, input_value=task.get("input_snapshot") or task.get("name", ""), approval_required=False)
+                    if DSH_RUNTIME.mode == "demo":
+                        schedule_local_run(run_id, task_id=task_id, workflow_id=run.get("workflow_id"))
+                    elif DSH_RUNTIME.mode == "native":
+                        schedule_harness_run(run_id, retry_request, task_id=task_id, workflow_id=run.get("workflow_id"))
                 self.send_json(run)
             elif path.startswith("/api/v1/runs/") and path.endswith("/callback"):
                 if not self.verify_callback_signature():
@@ -799,22 +944,41 @@ class Handler(BaseHTTPRequestHandler):
                     self.send_error_json("workflow.not_found", "workflow not found", 404)
                     return
                 run = {"id": f"run-{uuid.uuid4().hex[:8]}", "workflow_id": workflow_id, "tenant_id": tenant_id, "actor_id": actor_id, "runtime": DSH_RUNTIME.metadata(), "status": "queued", "message": "Workflow 已加入运行队列", "attempt": 1, "max_attempts": 3, "cancel_requested": False, "created_at": now_iso()}
+                workflow_request = DSH_RUNTIME.build_request(tenant_id=tenant_id, actor_id=actor_id, task_id=f"workflow:{workflow_id}", skill_id=workflow_id, input=payload.get("input", workflow.get("name", workflow_id)), knowledge_scope=[item["id"] for item in state["knowledge"] if item.get("pack_id") == workflow.get("pack_id")], allowed_tools=["workflow.read"], output_schema="workflow.result.v1")
+                try:
+                    run["runtime"] = DSH_RUNTIME.enqueue(workflow_request, run_id=run["id"])
+                except RuntimeUnavailableError as exc:
+                    self.send_error_json("runtime.unavailable", str(exc), 503, {"runtime": DSH_RUNTIME.metadata()})
+                    return
                 state["runs"].insert(0, run)
-                record_audit(state, tenant_id=tenant_id, actor_id=actor_id, action="workflow.run_queued", resource_type="run", resource_id=run["id"], metadata={"workflow_id": workflow_id})
+                record_audit(state, tenant_id=tenant_id, actor_id=actor_id, action="workflow.run_queued", resource_type="run", resource_id=run["id"], metadata={"workflow_id": workflow_id, "runtime_mode": DSH_RUNTIME.mode})
                 self.remember_idempotency(state, path, run, 201)
                 save_state(state)
-                schedule_local_run(run["id"], workflow_id=workflow_id)
+                if DSH_RUNTIME.mode == "demo":
+                    schedule_local_run(run["id"], workflow_id=workflow_id)
+                elif DSH_RUNTIME.mode == "native":
+                    schedule_harness_run(run["id"], workflow_request, workflow_id=workflow_id)
                 self.send_json(run, 201)
             elif path == "/api/v1/skill-runs":
                 if not self.require_role("owner", "admin", "editor", "operator"):
                     return
                 skill_id = str(payload.get("skill_id", "equipment-diagnosis"))
                 run = {"id": f"run-{uuid.uuid4().hex[:8]}", "task_id": None, "skill_id": skill_id, "tenant_id": tenant_id, "actor_id": actor_id, "runtime": DSH_RUNTIME.metadata(), "status": "queued", "duration": "", "message": "已加入运行队列", "attempt": 1, "max_attempts": 3, "cancel_requested": False, "created_at": now_iso(), "input": payload.get("input", "")}
+                skill = skill_for(skill_id)
+                skill_request = DSH_RUNTIME.build_request(tenant_id=tenant_id, actor_id=actor_id, task_id=f"skill:{skill_id}", skill_id=skill_id, input=payload.get("input", ""), knowledge_scope=[], allowed_tools=skill.get("dependencies", []), output_schema="skill.result.v1")
+                try:
+                    run["runtime"] = DSH_RUNTIME.enqueue(skill_request, run_id=run["id"])
+                except RuntimeUnavailableError as exc:
+                    self.send_error_json("runtime.unavailable", str(exc), 503, {"runtime": DSH_RUNTIME.metadata()})
+                    return
                 state["runs"].insert(0, run)
-                record_audit(state, tenant_id=tenant_id, actor_id=actor_id, action="skill.run_queued", resource_type="run", resource_id=run["id"], metadata={"skill_id": skill_id})
+                record_audit(state, tenant_id=tenant_id, actor_id=actor_id, action="skill.run_queued", resource_type="run", resource_id=run["id"], metadata={"skill_id": skill_id, "runtime_mode": DSH_RUNTIME.mode})
                 self.remember_idempotency(state, path, run, 201)
                 save_state(state)
-                schedule_local_run(run["id"])
+                if DSH_RUNTIME.mode == "demo":
+                    schedule_local_run(run["id"])
+                elif DSH_RUNTIME.mode == "native":
+                    schedule_harness_run(run["id"], skill_request)
                 self.send_json(run, 201)
             elif path.startswith("/api/v1/tasks/") and path.endswith("/runs"):
                 if not self.require_role("owner", "admin", "editor", "operator"):
@@ -829,28 +993,22 @@ class Handler(BaseHTTPRequestHandler):
                     return
                 approval_required = task.get("status") == "approval"
                 run = {"id": f"run-{uuid.uuid4().hex[:8]}", "task_id": task_id, "skill_id": task["skill_id"], "tenant_id": tenant_id, "actor_id": actor_id, "status": "queued", "duration": "", "message": "已加入运行队列", "attempt": 1, "max_attempts": 3, "cancel_requested": False, "created_at": now_iso()}
-                knowledge_scope = [item["id"] for item in state["knowledge"] if item.get("pack_id") == task["pack_id"]]
-                skill = skill_for(task["skill_id"])
-                request = DSH_RUNTIME.build_request(
-                    tenant_id=tenant_id,
-                    actor_id=actor_id,
-                    task_id=task_id,
-                    skill_id=task["skill_id"],
-                    input=payload.get("input", task.get("input_snapshot") or task.get("name", "")),
-                    knowledge_scope=knowledge_scope,
-                    allowed_tools=skill.get("dependencies", []),
-                    output_schema="task.result.v1",
-                    approval_required=approval_required,
-                )
-                run["runtime"] = DSH_RUNTIME.enqueue(request, run_id=run["id"])
+                request = build_task_runtime_request(state, task, tenant_id=tenant_id, actor_id=actor_id, input_value=payload.get("input", task.get("input_snapshot") or task.get("name", "")), approval_required=approval_required)
+                try:
+                    run["runtime"] = DSH_RUNTIME.enqueue(request, run_id=run["id"])
+                except RuntimeUnavailableError as exc:
+                    self.send_error_json("runtime.unavailable", str(exc), 503, {"runtime": DSH_RUNTIME.metadata()})
+                    return
                 state["runs"].insert(0, run)
-                record_audit(state, tenant_id=tenant_id, actor_id=actor_id, action="task.run_queued", resource_type="run", resource_id=run["id"], metadata={"task_id": task_id, "skill_id": task["skill_id"]})
+                record_audit(state, tenant_id=tenant_id, actor_id=actor_id, action="task.run_queued", resource_type="run", resource_id=run["id"], metadata={"task_id": task_id, "skill_id": task["skill_id"], "runtime_mode": DSH_RUNTIME.mode})
                 task["status"] = "approval" if approval_required else "queued"
                 task["status_label"] = "需审批" if approval_required else "待运行"
                 self.remember_idempotency(state, path, run, 201)
                 save_state(state)
-                if not DSH_RUNTIME.configured:
+                if DSH_RUNTIME.mode == "demo":
                     schedule_local_run(run["id"], task_id=task_id)
+                elif DSH_RUNTIME.mode == "native":
+                    schedule_harness_run(run["id"], request, task_id=task_id)
                 self.send_json(run, 201)
             elif path.startswith("/api/v1/approvals/"):
                 task_id = path.split("/")[4]
@@ -883,8 +1041,13 @@ class Handler(BaseHTTPRequestHandler):
                         task["status"] = "queued" if decision == "approved" else "cancelled"
                         task["status_label"] = "已批准" if decision == "approved" else "已拒绝"
                 save_state(state)
+                resumed_task = next((item for item in state["tasks"] if item["id"] == task_id), None)
                 for run_id in resumed_runs:
-                    schedule_local_run(run_id, task_id=task_id)
+                    if DSH_RUNTIME.mode == "demo":
+                        schedule_local_run(run_id, task_id=task_id)
+                    elif DSH_RUNTIME.mode == "native" and resumed_task:
+                        resumed_request = build_task_runtime_request(state, resumed_task, tenant_id=tenant_id, actor_id=actor_id, input_value=resumed_task.get("input_snapshot") or resumed_task.get("name", ""), approval_required=False)
+                        schedule_harness_run(run_id, resumed_request, task_id=task_id)
                 record_audit(state, tenant_id=tenant_id, actor_id=actor_id, action=f"approval.{decision}", resource_type="task", resource_id=task_id, metadata={"resumed_runs": resumed_runs})
                 save_state(state)
                 self.send_json({"task_id": task_id, "status": decision, "resumed_runs": resumed_runs})

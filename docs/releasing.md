@@ -24,4 +24,4 @@ npm publish --access public
 
 ## 服务端
 
-参考服务通过 Docker Compose 发布。生产环境需要设置 `WORKBENCH_AUTH_TOKEN`、`DSH_CALLBACK_SECRET`、`DSH_ENDPOINT`，并将 SQLite 换成外部数据库或持久化服务。SDK 和 HTTP 契约遵循 SemVer，破坏性字段变更必须提升主版本。
+参考服务通过 Docker Compose 发布。生产环境需要设置 `WORKBENCH_AUTH_TOKEN`、`DSH_CALLBACK_SECRET`，并选择 native Harness（`DSH_HARNESS_HOME`、专用 restricted profile）或 sidecar（`DSH_ENDPOINT`）。不要直接使用 `sdk-minimal` 作为 SaaS profile；应将 Harness 放进隔离容器并将 SQLite 换成外部数据库或持久化服务。SDK 和 HTTP 契约遵循 SemVer，破坏性字段变更必须提升主版本。

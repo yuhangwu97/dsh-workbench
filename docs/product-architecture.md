@@ -144,6 +144,6 @@ POST   /api/v1/approvals/:id/reject
 
 ## DSH Runtime Boundary
 
-`runtime/dsh_runtime.py` 只接受显式的租户、操作者、`task_id`、`skill_id`、知识范围、允许工具和输出 Schema。当前默认返回 `local-demo` 的 queued envelope；本地 worker 会把 Run 推进到 `running`、`completed` 或 `waiting_approval`，审批通过后恢复执行，并将结果写入产品层 Artifact。设置 `DSH_ENDPOINT` 后，Runtime 会 POST 受限请求到 DSH，DSH 通过 Run callback 回写状态和 Artifact。
+`runtime/dsh_runtime.py` 只接受显式的租户、操作者、`task_id`、`skill_id`、知识范围、允许工具和输出 Schema。`DSH_RUNTIME_MODE=native` 时，Runtime 通过官方 `deepseek-harness-sdk` 创建受限 profile 和 session；`sidecar` 时发送相同的受控 envelope，由隔离的 Harness gateway 回调；只有显式 `demo` 时才使用本地 worker。没有 native SDK 或 sidecar endpoint 时，Runtime 报告 `unavailable`，不会伪造推理结果。Native 结果会写入 Run、Event 和 `harness-result.json` / `harness-events.jsonl` Artifact。
 
 业务写入由产品层审批，不能由运行时直接决定。运行时的 trace 可以作为 Run 证据保存，但不能覆盖 Task 状态或 Artifact 内容。

@@ -129,17 +129,33 @@ cd dsh-workbench
 python3 server.py --port 8766
 ```
 
-打开 <http://127.0.0.1:8766/>，你会看到 Overview、Chat、Tasks、Knowledge、Workflow、Approvals 和 Artifacts。默认的 `local-demo` runtime 使用本地 JSON 状态，适合体验完整链路。
+打开 <http://127.0.0.1:8766/>，你会看到 Overview、Chat、Tasks、Knowledge、Workflow、Approvals 和 Artifacts。没有配置 Harness 时，服务会明确显示 `unavailable`；只有显式设置 `DSH_RUNTIME_MODE=demo` 才启用确定性的产品演示。
 
-Open <http://127.0.0.1:8766/> to explore Overview, Chat, Tasks, Knowledge, Workflow, Approvals, and Artifacts. The default `local-demo` runtime uses local JSON state for a fast end-to-end walkthrough.
+Open <http://127.0.0.1:8766/> to explore Overview, Chat, Tasks, Knowledge, Workflow, Approvals, and Artifacts. Without Harness configuration, the service reports `unavailable`; the deterministic walkthrough is opt-in with `DSH_RUNTIME_MODE=demo`.
 
 如果你希望用 Docker 启动：
 
 ```bash
 cp .env.example .env
-# 设置 WORKBENCH_AUTH_TOKEN；真实 DSH 可填写 DSH_ENDPOINT
+# 设置 WORKBENCH_AUTH_TOKEN；native 模式配置 DSH_HARNESS_HOME，sidecar 模式配置 DSH_ENDPOINT
 docker compose up -d --build
 ```
+
+## DeepSeek Harness runtime
+
+Workbench 的 Task/Run 控制面由产品服务负责，真实推理和工具编排交给 DeepSeek Harness。开发环境可以直接安装官方 SDK：
+
+```bash
+python -m pip install "dsh-workbench[harness]"
+export DSH_RUNTIME_MODE=native
+export DSH_HARNESS_HOME=/absolute/path/to/workbench-dsh-home
+export DSH_HARNESS_PROFILE=workbench-readonly
+export DSH_HARNESS_WORKSPACE=/absolute/path/to/isolated-workspace
+```
+
+生产环境可以设置 `DSH_RUNTIME_MODE=sidecar` 和 `DSH_ENDPOINT`，让 Harness 在单独容器中运行。不要把官方 `sdk-minimal`、shell、任意文件系统或直接业务写入工具作为 SaaS profile；请通过 `workbench-readonly` profile 和带租户复核的工具插件暴露能力。
+
+The Workbench owns Task/Run governance while DeepSeek Harness owns reasoning, tools, sessions, and technical events. Use the native SDK for development or point `DSH_RUNTIME_MODE=sidecar` at an isolated Harness gateway in production.
 
 ## 给开发者的扩展面 | Build on the platform
 
@@ -200,9 +216,9 @@ Python and TypeScript SDKs share the OpenAPI and JSON Schema contracts. Provider
 
 Ships today: the reference console, API and Schema contracts, Python/TypeScript SDKs, Scenario Pack manifests, Provider interfaces, Docker, CI, and tests.
 
-生产环境还需要接入 OIDC/JWT、托管数据库、队列、对象存储、真实 Knowledge Provider 和 DSH endpoint。参考服务的 `local-demo` 执行器用于产品体验，不冒充真实模型推理。
+生产环境还需要接入 OIDC/JWT、托管数据库、队列、对象存储和真实 Knowledge Provider。运行时现在直接支持官方 DeepSeek Harness SDK，或连接隔离的 Harness sidecar；`local-demo` 只有显式启用时才可用于产品体验。
 
-For production, add OIDC/JWT, a managed database, a queue, object storage, a real Knowledge Provider, and a configured DSH endpoint. The `local-demo` executor is for product walkthroughs; it does not pretend to be model inference.
+For production, add OIDC/JWT, a managed database, a queue, object storage, and a real Knowledge Provider. The runtime can use the official DeepSeek Harness SDK directly or an isolated Harness sidecar; `local-demo` is opt-in for product walkthroughs.
 
 ## 现在已经可以继续什么 | What is already wired
 

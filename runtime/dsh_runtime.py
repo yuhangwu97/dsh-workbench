@@ -37,6 +37,7 @@ class DshRuntime:
         self.endpoint = endpoint or os.getenv("DSH_ENDPOINT", "").strip()
         self.requested_mode = (mode or os.getenv("DSH_RUNTIME_MODE", "auto")).strip().lower() or "auto"
         self._native_executor = None
+        self._sidecar_executor = None
 
     @property
     def mode(self) -> str:
@@ -104,41 +105,15 @@ class DshRuntime:
             approval_required=approval_required,
         )
 
-    def _sidecar_envelope(self, request: DshRunRequest, *, run_id: str | None = None) -> dict[str, Any]:
-        envelope = {
-            "status": "queued",
-            "runtime": "dsh-harness",
-            "mode": "sidecar",
-            "tenant_id": request.tenant_id,
-            "actor_id": request.actor_id,
-            "run_id": run_id,
-            "task_id": request.task_id,
-            "skill_id": request.skill_id,
-            "knowledge_scope": list(request.knowledge_scope),
-            "allowed_tools": list(request.allowed_tools),
-            "output_schema": request.output_schema,
-            "approval_required": request.approval_required,
-            "profile": os.getenv("DSH_HARNESS_PROFILE", "workbench-readonly"),
-            "callback_url": os.getenv("DSH_CALLBACK_URL", ""),
-        }
-        return envelope
+    def _sidecar(self):
+        if self._sidecar_executor is None:
+            from .dsh_sidecar import DshSidecarExecutor
+
+            self._sidecar_executor = DshSidecarExecutor(self.endpoint)
+        return self._sidecar_executor
 
     def _dispatch_sidecar(self, request: DshRunRequest, *, run_id: str | None = None) -> dict[str, Any]:
-        envelope = self._sidecar_envelope(request, run_id=run_id)
-        body = json.dumps(envelope, ensure_ascii=False).encode("utf-8")
-        http_request = Request(self.endpoint, data=body, method="POST", headers={"Content-Type": "application/json", "X-Tenant-ID": request.tenant_id, "X-Actor-ID": request.actor_id})
-        try:
-            with urlopen(http_request, timeout=8) as response:
-                envelope["dispatch"] = {"status_code": response.status}
-                response_body = response.read(64 * 1024)
-                if response_body:
-                    try:
-                        envelope["response"] = json.loads(response_body.decode("utf-8"))
-                    except (UnicodeDecodeError, json.JSONDecodeError):
-                        envelope["response"] = {"body": response_body[:512].decode("utf-8", errors="replace")}
-        except URLError as exc:
-            raise RuntimeError(f"DSH sidecar dispatch failed: {exc.reason}") from exc
-        return envelope
+        return self._sidecar().dispatch(request, run_id=run_id or "")
 
     def enqueue(self, request: DshRunRequest, *, run_id: str | None = None) -> dict[str, Any]:
         mode = self.mode
@@ -176,8 +151,10 @@ class DshRuntime:
         raise RuntimeUnavailableError("configure DSH_RUNTIME_MODE=demo, DSH_ENDPOINT, or DSH_HARNESS_HOME")
 
     def cancel(self, run_id: str) -> None:
-        if self._native_executor is not None and self.mode == "native":
+        if self.mode == "native" and self._native_executor is not None:
             self._native_executor.cancel(run_id)
+        elif self.mode == "sidecar" and self._sidecar_executor is not None:
+            self._sidecar_executor.cancel(run_id)
 
     def close(self) -> None:
         if self._native_executor is not None:

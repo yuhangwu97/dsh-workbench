@@ -15,7 +15,7 @@ classifiers = ["Programming Language :: Python :: 3", "Typing :: Typed"]
 dependencies = []
 
 [project.optional-dependencies]
-harness = ["deepseek-harness-sdk>=0.1.0"]
+harness = ["deepseek-harness-sdk"]
 [project.urls]
 Homepage = "https://github.com/yuhangwu97/dsh-workbench"
 Documentation = "https://github.com/yuhangwu97/dsh-workbench/tree/main/docs"

@@ -1,6 +1,6 @@
 # DSH Workbench
 
-面向企业的 AI Task Platform 前端 Demo。平台把业务输入统一成 Task，用 Scenario Pack 组织 Skills、Knowledge、Workflows 和审批策略，适合作为 DSH 运行时的产品层工作台。
+面向企业的开源 AI Task Platform 框架。平台把业务输入统一成 Task，用 Scenario Pack 组织 Skills、Knowledge、Workflows 和审批策略，Workbench 提供官方控制台和参考服务，适合作为 DSH 运行时的产品层。
 
 这是一个可以自托管和二次开发的开源框架。Workbench 是官方控制台和参考服务；`contracts/` 是公共 HTTP/JSON 契约；`packages/python` 和 `packages/typescript` 是给外部应用使用的 SDK。
 

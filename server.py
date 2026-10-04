@@ -14,7 +14,7 @@ import uuid
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 from runtime.dsh_runtime import DshRuntime
 
@@ -310,6 +310,20 @@ class Handler(BaseHTTPRequestHandler):
         supplied = signature.removeprefix("sha256=")
         return bool(supplied) and hmac.compare_digest(supplied, expected)
 
+    def paginated(self, items: list[dict]) -> list[dict] | dict | None:
+        query = parse_qs(urlparse(self.path).query)
+        if "page_size" not in query and "page_token" not in query:
+            return items
+        try:
+            page_size = min(max(int(query.get("page_size", ["50"])[0]), 1), 100)
+            offset = max(int(query.get("page_token", ["0"])[0] or "0"), 0)
+        except ValueError:
+            self.send_error_json("pagination.invalid", "page_size and page_token must be numeric", 422)
+            return None
+        page = items[offset:offset + page_size]
+        next_offset = offset + page_size
+        return {"items": page, "next_page_token": str(next_offset) if next_offset < len(items) else None}
+
     def read_json(self) -> dict:
         length = int(self.headers.get("Content-Length", "0"))
         if length > 1024 * 1024:
@@ -405,9 +419,13 @@ class Handler(BaseHTTPRequestHandler):
             elif path == "/api/v1/skills":
                 self.send_json(SKILLS)
             elif path == "/api/v1/tasks":
-                self.send_json(visible_tasks)
+                page = self.paginated(visible_tasks)
+                if page is not None:
+                    self.send_json(page)
             elif path == "/api/v1/runs":
-                self.send_json(visible_runs)
+                page = self.paginated(visible_runs)
+                if page is not None:
+                    self.send_json(page)
             elif path.startswith("/api/v1/runs/"):
                 run_id = path.split("/")[4]
                 run = next((item for item in visible_runs if item["id"] == run_id), None)
@@ -424,7 +442,9 @@ class Handler(BaseHTTPRequestHandler):
             elif path == "/api/v1/audit":
                 self.send_json([entry for entry in state.get("audit", []) if entry.get("tenant_id", DEMO_TENANT_ID) == tenant_id])
             elif path == "/api/v1/artifacts":
-                self.send_json([artifact | {"task_id": task_id} for task_id, artifacts in state["artifacts"].items() if task_id in visible_task_ids for artifact in artifacts])
+                page = self.paginated([artifact | {"task_id": task_id} for task_id, artifacts in state["artifacts"].items() if task_id in visible_task_ids for artifact in artifacts])
+                if page is not None:
+                    self.send_json(page)
             elif path.startswith("/api/v1/tasks/") and path.endswith("/artifacts"):
                 task_id = path.split("/")[4]
                 if task_id not in visible_task_ids:

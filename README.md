@@ -22,7 +22,7 @@
 Python：
 
 ```bash
-python -m pip install dsh-workbench
+python -m pip install -e packages/python
 ```
 
 ```python
@@ -38,7 +38,7 @@ print(completed.status.value)
 TypeScript：
 
 ```bash
-npm install @dsh-workbench/sdk
+npm install ./packages/typescript
 ```
 
 ```ts

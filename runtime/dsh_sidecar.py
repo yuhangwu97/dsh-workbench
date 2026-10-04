@@ -55,6 +55,7 @@ class DshSidecarExecutor:
             "allowed_tools": list(request.allowed_tools),
             "output_schema": request.output_schema,
             "approval_required": request.approval_required,
+            "tool_gateway_url": request.tool_gateway_url,
             "profile": self.profile,
             "callback_url": self.callback_url,
         }

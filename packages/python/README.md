@@ -16,6 +16,9 @@ evidence = client.knowledge.search("pump relay", pack_id="after-sales")
 task = client.tasks.create(name="Diagnose", pack_id="after-sales", skill_id="equipment-diagnosis")
 run = client.tasks.run(task.id)
 completed = client.runs.wait(run.id)
+
+ticket = client.tools.call(run_id=run.id, tool="ticket.read", arguments={"ticket_id": "8812"})
+# A maintenance.action call returns an approval id before it creates a write.
 ```
 
 Run controls are available through `client.runs.cancel(run_id)`, `client.runs.retry(run_id)`, and `client.runs.queue()`. Scenario Packs and org access are available through `client.scenario_packs` and `client.organization`. Search responses include `citations` and `citation_id` values that can be attached to an Artifact.

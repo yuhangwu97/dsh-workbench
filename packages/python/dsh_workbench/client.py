@@ -89,6 +89,7 @@ class DSHClient:
         self.artifacts = ArtifactsResource(self)
         self.scenario_packs = ScenarioPacksResource(self)
         self.organization = OrganizationResource(self)
+        self.tools = ToolsResource(self)
 
     def _request(self, method: str, path: str, payload: Any | None = None, *, idempotency_key: str | None = None) -> Any:
         request_id = self.headers.get("X-Request-ID") or f"req_{uuid.uuid4().hex[:16]}"
@@ -255,6 +256,25 @@ class OrganizationResource:
         return self.client._request("POST", "/api/v1/org/members", {"email": email, "role": role}, idempotency_key=idempotency_key)
 
 
+class ToolsResource:
+    """Run-scoped Tool Gateway access for business connectors."""
+
+    def __init__(self, client: DSHClient) -> None:
+        self.client = client
+
+    def catalog(self) -> list[dict[str, Any]]:
+        return _items(self.client._request("GET", "/api/v1/tools"))
+
+    def call(self, *, run_id: str, tool: str, arguments: Mapping[str, Any] | None = None) -> dict[str, Any]:
+        return self.client._request("POST", "/api/v1/tools/call", {"run_id": run_id, "tool": tool, "arguments": dict(arguments or {})})
+
+    def approve(self, approval_id: str) -> dict[str, Any]:
+        return self.client._request("POST", f"/api/v1/tool-approvals/{quote(approval_id, safe='')}/approve", {})
+
+    def reject(self, approval_id: str) -> dict[str, Any]:
+        return self.client._request("POST", f"/api/v1/tool-approvals/{quote(approval_id, safe='')}/reject", {})
+
+
 class ArtifactsResource:
     def __init__(self, client: DSHClient) -> None:
         self.client = client
@@ -289,6 +309,7 @@ class AsyncDSHClient:
         self.artifacts = _AsyncArtifacts(self._sync.artifacts)
         self.scenario_packs = _AsyncScenarioPacks(self._sync.scenario_packs)
         self.organization = _AsyncOrganization(self._sync.organization)
+        self.tools = _AsyncTools(self._sync.tools)
 
 
 class _AsyncMethod:
@@ -345,6 +366,16 @@ class _AsyncOrganization:
 
     async def list_members(self) -> list[dict[str, Any]]: return await asyncio.to_thread(self.resource.list_members)
     async def invite(self, **kwargs: Any) -> dict[str, Any]: return await asyncio.to_thread(self.resource.invite, **kwargs)
+
+
+class _AsyncTools:
+    def __init__(self, resource: ToolsResource) -> None:
+        self.resource = resource
+
+    async def catalog(self) -> list[dict[str, Any]]: return await asyncio.to_thread(self.resource.catalog)
+    async def call(self, **kwargs: Any) -> dict[str, Any]: return await asyncio.to_thread(self.resource.call, **kwargs)
+    async def approve(self, approval_id: str) -> dict[str, Any]: return await asyncio.to_thread(self.resource.approve, approval_id)
+    async def reject(self, approval_id: str) -> dict[str, Any]: return await asyncio.to_thread(self.resource.reject, approval_id)
 
 
 class _AsyncArtifacts:

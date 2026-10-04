@@ -31,6 +31,7 @@ export class DSHClient {
   readonly artifacts: ArtifactsResource;
   readonly scenarioPacks: ScenarioPacksResource;
   readonly organization: OrganizationResource;
+  readonly tools: ToolsResource;
   private readonly baseUrl: string;
   private readonly options: DSHClientOptions;
   private readonly fetchImpl: typeof fetch;
@@ -49,6 +50,7 @@ export class DSHClient {
     this.artifacts = new ArtifactsResource(this);
     this.scenarioPacks = new ScenarioPacksResource(this);
     this.organization = new OrganizationResource(this);
+    this.tools = new ToolsResource(this);
   }
 
   async request<T>(method: string, path: string, body?: unknown, idempotencyKey?: string): Promise<T> {
@@ -141,6 +143,20 @@ class OrganizationResource {
   constructor(private readonly client: DSHClient) {}
   listMembers(): Promise<Array<Record<string, unknown>>> { return this.client.request('GET', '/api/v1/org/members'); }
   invite(email: string, role = 'viewer', idempotencyKey?: string): Promise<Record<string, unknown>> { return this.client.request('POST', '/api/v1/org/members', { email, role }, idempotencyKey); }
+}
+
+export interface ToolCallInput {
+  runId: string;
+  tool: string;
+  arguments?: Record<string, unknown>;
+}
+
+class ToolsResource {
+  constructor(private readonly client: DSHClient) {}
+  catalog(): Promise<Array<Record<string, unknown>>> { return this.client.request('GET', '/api/v1/tools'); }
+  call(input: ToolCallInput): Promise<Record<string, unknown>> { return this.client.request('POST', '/api/v1/tools/call', { run_id: input.runId, tool: input.tool, arguments: input.arguments ?? {} }); }
+  approve(approvalId: string): Promise<Record<string, unknown>> { return this.client.request('POST', `/api/v1/tool-approvals/${encodeURIComponent(approvalId)}/approve`, {}); }
+  reject(approvalId: string): Promise<Record<string, unknown>> { return this.client.request('POST', `/api/v1/tool-approvals/${encodeURIComponent(approvalId)}/reject`, {}); }
 }
 
 class ArtifactsResource {

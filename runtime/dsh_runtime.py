@@ -24,6 +24,7 @@ class DshRunRequest:
     allowed_tools: tuple[str, ...]
     output_schema: str
     approval_required: bool = False
+    tool_gateway_url: str | None = None
 
 
 class DshRuntime:
@@ -86,9 +87,14 @@ class DshRuntime:
                 "network": "product-approved-egress",
                 "business_writes": "approval-required",
             },
+            "tool_gateway": {
+                "url": os.getenv("DSH_TOOL_GATEWAY_URL", "").strip() or None,
+                "path": "/api/v1/tools/call",
+                "authorization": "run-scoped allowed_tools plus tenant and actor binding",
+            },
         }
 
-    def build_request(self, *, tenant_id: str, actor_id: str, task_id: str, skill_id: str, input: Any, knowledge_scope: list[str], allowed_tools: list[str], output_schema: str, approval_required: bool = False) -> DshRunRequest:
+    def build_request(self, *, tenant_id: str, actor_id: str, task_id: str, skill_id: str, input: Any, knowledge_scope: list[str], allowed_tools: list[str], output_schema: str, approval_required: bool = False, tool_gateway_url: str | None = None) -> DshRunRequest:
         if not tenant_id or not actor_id or not task_id or not skill_id:
             raise ValueError("tenant_id, actor_id, task_id and skill_id are required")
         if not allowed_tools:
@@ -103,6 +109,7 @@ class DshRuntime:
             allowed_tools=tuple(allowed_tools),
             output_schema=output_schema,
             approval_required=approval_required,
+            tool_gateway_url=tool_gateway_url or os.getenv("DSH_TOOL_GATEWAY_URL", "").strip() or None,
         )
 
     def _sidecar(self):

@@ -151,11 +151,33 @@ export DSH_RUNTIME_MODE=native
 export DSH_HARNESS_HOME=/absolute/path/to/workbench-dsh-home
 export DSH_HARNESS_PROFILE=workbench-readonly
 export DSH_HARNESS_WORKSPACE=/absolute/path/to/isolated-workspace
+export DSH_TOOL_GATEWAY_URL=http://127.0.0.1:8766
 ```
 
 生产环境可以设置 `DSH_RUNTIME_MODE=sidecar` 和 `DSH_ENDPOINT`，让 Harness 在单独容器中运行。不要把官方 `sdk-minimal`、shell、任意文件系统或直接业务写入工具作为 SaaS profile；请通过 `workbench-readonly` profile 和带租户复核的工具插件暴露能力。
 
 The Workbench owns Task/Run governance while DeepSeek Harness owns reasoning, tools, sessions, and technical events. Use the native SDK for development or point `DSH_RUNTIME_MODE=sidecar` at an isolated Harness gateway in production.
+
+### After-sales Tool Gateway
+
+售后诊断的工具调用必须绑定到一个已创建的 Run。网关会校验租户、操作者和该 Run 的 `allowed_tools`，再执行工具。首批工具包括：
+
+```text
+ticket.read          读取工单、症状和关联设备
+device.status        读取设备遥测与故障状态
+maintenance.action   登记维修动作；需要人工审批后才会产生副作用
+```
+
+```bash
+curl http://127.0.0.1:8766/api/v1/tools
+curl -X POST http://127.0.0.1:8766/api/v1/tools/call \
+  -H 'Content-Type: application/json' \
+  -d '{"run_id":"run-1001","tool":"ticket.read","arguments":{"ticket_id":"8812"}}'
+```
+
+`maintenance.action` 返回审批单后，通过 `/api/v1/tool-approvals/:id/approve` 执行；拒绝则不会写入维修动作记录。Python SDK 使用 `client.tools.call(...)`、`client.tools.approve(...)`，TypeScript SDK 使用 `client.tools.call(...)`。
+
+Business tools are bound to a Run. The gateway checks tenant, actor, and the Run's `allowed_tools` before dispatch. `maintenance.action` creates a pending approval and only writes the maintenance record after approval. Use `client.tools.call(...)` and `client.tools.approve(...)` from either SDK.
 
 ## 给开发者的扩展面 | Build on the platform
 
@@ -212,9 +234,9 @@ Python and TypeScript SDKs share the OpenAPI and JSON Schema contracts. Provider
 
 **v0.1.0 · Framework foundation**
 
-已经包含：参考控制台、API 与 Schema 契约、Python/TypeScript SDK、Scenario Pack manifest、Provider 扩展接口、Docker、CI 和测试。
+已经包含：参考控制台、API 与 Schema 契约、Python/TypeScript SDK、Scenario Pack manifest、售后 Tool Gateway（工单、设备状态、维修审批动作）、Provider 扩展接口、Docker、CI 和测试。
 
-Ships today: the reference console, API and Schema contracts, Python/TypeScript SDKs, Scenario Pack manifests, Provider interfaces, Docker, CI, and tests.
+Ships today: the reference console, API and Schema contracts, Python/TypeScript SDKs, Scenario Pack manifests, the after-sales Tool Gateway for ticket, device, and approved maintenance actions, Provider interfaces, Docker, CI, and tests.
 
 生产环境还需要接入 OIDC/JWT、托管数据库、队列、对象存储和真实 Knowledge Provider。运行时现在直接支持官方 DeepSeek Harness SDK，或连接隔离的 Harness sidecar；`local-demo` 只有显式启用时才可用于产品体验。
 

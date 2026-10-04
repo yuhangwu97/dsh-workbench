@@ -21,6 +21,7 @@ from runtime.dsh_harness import HarnessResult
 from runtime.dsh_runtime import DshRuntime, RuntimeUnavailableError
 from runtime.knowledge import KnowledgeIndex
 from runtime.security import roles_from_claims, verify_hs256
+from runtime.tool_gateway import ToolGateway, ToolGatewayError
 from tools_evaluate_packs import evaluate as evaluate_pack_manifest
 
 ROOT = Path(__file__).resolve().parent
@@ -40,6 +41,7 @@ OIDC_ISSUER = os.getenv("WORKBENCH_OIDC_ISSUER", "").strip()
 MAX_CONCURRENCY = max(1, int(os.getenv("WORKBENCH_MAX_CONCURRENCY", "4")))
 RUN_SEMAPHORE = threading.BoundedSemaphore(MAX_CONCURRENCY)
 KNOWLEDGE_INDEX = KnowledgeIndex.from_env()
+TOOL_GATEWAY = ToolGateway()
 
 PACKS = [
     {"id": "after-sales", "name": "售后诊断", "color": "green", "status": "enabled", "skills": 8, "workflows": 3, "knowledge_bases": 4, "description": "面向售后团队的设备问题定位、证据收集和维修建议。"},
@@ -47,7 +49,7 @@ PACKS = [
     {"id": "operations", "name": "运营告警", "color": "orange", "status": "enabled", "skills": 5, "workflows": 2, "knowledge_bases": 3, "description": "面向运营团队的告警聚合、影响分析和升级流程。"},
 ]
 SKILLS = [
-    {"id": "equipment-diagnosis", "name": "设备故障诊断", "pack_id": "after-sales", "version": "1.3.0", "trust": "verified", "dependencies": ["kb.search", "ticket.read", "device.status"]},
+    {"id": "equipment-diagnosis", "name": "设备故障诊断", "pack_id": "after-sales", "version": "1.4.0", "trust": "verified", "dependencies": ["kb.search", "ticket.read", "device.status", "maintenance.action"]},
     {"id": "issue-investigation", "name": "Issue 调查", "pack_id": "engineering", "version": "0.8.2", "trust": "verified", "dependencies": ["repo.read", "issue.read", "search"]},
     {"id": "alert-triage", "name": "告警处置", "pack_id": "operations", "version": "2.1.0", "trust": "org", "dependencies": ["alert.read", "runbook.search"]},
 ]
@@ -87,6 +89,8 @@ def seed_state() -> dict:
             {"id": "run-0999", "task_id": "TK-20261004-0016", "skill_id": "alert-triage", "status": "approval", "duration": "", "message": "影响范围分析", "created_at": now_iso()},
         ],
         "approvals": [{"id": "TK-20261004-0016", "task_id": "TK-20261004-0016", "status": "pending", "reason": "升级运营告警"}],
+        "tool_approvals": [],
+        "maintenance_actions": [],
         "audit": [],
         "idempotency": {},
         "artifacts": {
@@ -154,6 +158,10 @@ def load_state() -> dict:
             if key not in state:
                 state[key] = seed[key]
                 changed = True
+        for key in ("tool_approvals", "maintenance_actions"):
+            if key not in state or not isinstance(state[key], list):
+                state[key] = seed[key]
+                changed = True
         if "audit" not in state:
             state["audit"] = seed["audit"]
             changed = True
@@ -169,6 +177,13 @@ def load_state() -> dict:
                 changed = True
             if "cancel_requested" not in run:
                 run["cancel_requested"] = False
+                changed = True
+            if "allowed_tools" not in run:
+                owner = next((item for item in state.get("tasks", []) if item.get("id") == run.get("task_id")), None)
+                run["allowed_tools"] = list(skill_for(owner.get("skill_id", "")).get("dependencies", [])) if owner else ["workflow.read"]
+                changed = True
+            if "runtime" in run and isinstance(run["runtime"], dict) and "allowed_tools" not in run["runtime"]:
+                run["runtime"]["allowed_tools"] = list(run["allowed_tools"])
                 changed = True
         for task in state.get("tasks", []):
             if "input_snapshot" not in task:
@@ -364,6 +379,12 @@ def build_task_runtime_request(state: dict, task: dict, *, tenant_id: str, actor
         approval_required=approval_required,
     )
 
+def apply_run_policy(run: dict, request: Any) -> dict:
+    """Persist the same tool policy sent to DSH so the gateway can enforce it."""
+    run["allowed_tools"] = list(request.allowed_tools)
+    run.setdefault("runtime", {})["allowed_tools"] = list(request.allowed_tools)
+    return run
+
 def schedule_local_run(run_id: str, *, task_id: str | None = None, workflow_id: str | None = None) -> None:
     """Advance a demo run with bounded concurrency and cancellation checks."""
     def worker() -> None:
@@ -412,6 +433,11 @@ def schedule_local_run(run_id: str, *, task_id: str | None = None, workflow_id: 
                                 task["status"] = "cancelled"
                                 task["status_label"] = "已取消"
                         record_audit(state, tenant_id=run.get("tenant_id", DEMO_TENANT_ID), actor_id=run.get("actor_id", DEMO_ACTOR_ID), action="run.cancelled", resource_type="run", resource_id=run_id, metadata={"task_id": task_id})
+                        save_state(state)
+                        return
+                    if run.get("status") == "waiting_approval":
+                        # A Tool Gateway write is paused for human approval. Do
+                        # not let the demo worker finalize the Run underneath it.
                         save_state(state)
                         return
                     task = next((item for item in state["tasks"] if item["id"] == task_id), None) if task_id else None
@@ -686,6 +712,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json({"status": "ready", "service": "dsh-workbench", "storage": {"type": STORAGE_MODE, "status": "available"}, "runtime": DSH_RUNTIME.metadata()})
             elif path == "/api/v1/runtime":
                 self.send_json(DSH_RUNTIME.metadata())
+            elif path == "/api/v1/tools":
+                self.send_json(TOOL_GATEWAY.catalog())
             elif path == "/api/v1/queue":
                 counts = {}
                 for run in visible_runs:
@@ -696,7 +724,7 @@ class Handler(BaseHTTPRequestHandler):
             elif path == "/api/v1/dashboard":
                 approvals = [approval for approval in state["approvals"] if approval.get("task_id") in visible_task_ids]
                 artifacts = {task_id: items for task_id, items in state["artifacts"].items() if task_id in visible_task_ids}
-                self.send_json({"packs": PACKS, "skills": SKILLS, "tasks": visible_tasks, "runs": visible_runs, "approvals": approvals, "knowledge": state["knowledge"], "workflows": state["workflows"], "artifacts": artifacts, "metrics": {"open_tasks": sum(t["status"] != "completed" for t in visible_tasks), "runs_this_week": 148, "completion_rate": 86, "waiting_approval": len([a for a in approvals if a["status"] == "pending"])}, "context": {"tenant_id": tenant_id}})
+                self.send_json({"packs": PACKS, "skills": SKILLS, "tasks": visible_tasks, "runs": visible_runs, "approvals": approvals, "tool_approvals": [approval for approval in state.get("tool_approvals", []) if approval.get("tenant_id") == tenant_id], "tools": TOOL_GATEWAY.catalog(), "knowledge": state["knowledge"], "workflows": state["workflows"], "artifacts": artifacts, "metrics": {"open_tasks": sum(t["status"] != "completed" for t in visible_tasks), "runs_this_week": 148, "completion_rate": 86, "waiting_approval": len([a for a in approvals if a["status"] == "pending"])}, "context": {"tenant_id": tenant_id}})
             elif path == "/api/v1/registry/scenario-packs":
                 self.send_json({"registry_version": "dsh.workbench/registry.v1", "packs": state.get("pack_registry", load_registry())})
             elif path == "/api/v1/scenario-packs":
@@ -735,6 +763,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json(state["workflows"])
             elif path == "/api/v1/approvals":
                 self.send_json([approval for approval in state["approvals"] if approval.get("task_id") in visible_task_ids])
+            elif path == "/api/v1/tool-approvals":
+                self.send_json([approval for approval in state.get("tool_approvals", []) if approval.get("tenant_id") == tenant_id])
             elif path == "/api/v1/audit":
                 self.send_json([entry for entry in state.get("audit", []) if entry.get("tenant_id", DEMO_TENANT_ID) == tenant_id])
             elif path == "/api/v1/events":
@@ -844,6 +874,79 @@ class Handler(BaseHTTPRequestHandler):
                 record_audit(state, tenant_id=tenant_id, actor_id=actor_id, action="chat.message_received", resource_type="chat", resource_id=payload.get("conversation_id", "default"), metadata={"pack_id": pack_id, "evidence_count": response["evidence_count"]})
                 save_state(state)
                 self.send_json(response, 201)
+            elif path == "/api/v1/tools/call":
+                if not self.require_role("owner", "admin", "editor", "operator"):
+                    return
+                run_id = str(payload.get("run_id", "")).strip()
+                tool = str(payload.get("tool", "")).strip()
+                arguments = payload.get("arguments", {})
+                if not run_id or not tool or not isinstance(arguments, dict):
+                    self.send_error_json("tool.invalid_request", "run_id, tool and an object arguments value are required", 422)
+                    return
+                try:
+                    result = TOOL_GATEWAY.call(state, tenant_id=tenant_id, actor_id=actor_id, run_id=run_id, tool=tool, arguments=arguments)
+                except ToolGatewayError as exc:
+                    run = next((item for item in state.get("runs", []) if item.get("id") == run_id and item.get("tenant_id") == tenant_id), None)
+                    if exc.code == "tool.approval_required" and run:
+                        run["status"] = "waiting_approval"
+                        run["message"] = "维修动作等待审批"
+                        approval = {"id": f"tool-approval-{uuid.uuid4().hex[:10]}", "type": "tool", "tool": tool, "arguments": arguments, "run_id": run_id, "tenant_id": tenant_id, "actor_id": actor_id, "status": "pending", "created_at": now_iso()}
+                        state.setdefault("tool_approvals", []).insert(0, approval)
+                        record_audit(state, tenant_id=tenant_id, actor_id=actor_id, action="tool.approval_requested", resource_type="run", resource_id=run_id, metadata={"tool": tool, "approval_id": approval["id"]})
+                        save_state(state)
+                        self.send_json({"approval": approval}, 202)
+                        return
+                    record_audit(state, tenant_id=tenant_id, actor_id=actor_id, action="tool.denied", resource_type="run", resource_id=run_id, metadata={"tool": tool, "code": exc.code})
+                    save_state(state)
+                    self.send_error_json(exc.code, exc.message, exc.status, exc.details)
+                    return
+                record_audit(state, tenant_id=tenant_id, actor_id=actor_id, action="tool.called", resource_type="run", resource_id=run_id, metadata={"tool": tool})
+                save_state(state)
+                self.send_json({"run_id": run_id, "tool": tool, "result": result}, 200)
+            elif path.startswith("/api/v1/tool-approvals/"):
+                if not self.require_role("owner", "admin", "editor", "operator"):
+                    return
+                parts = path.split("/")
+                approval_id = parts[4] if len(parts) > 4 else ""
+                decision = "approved" if path.endswith("/approve") else "rejected" if path.endswith("/reject") else None
+                approval = next((item for item in state.get("tool_approvals", []) if item.get("id") == approval_id and item.get("tenant_id") == tenant_id), None)
+                if not approval or not decision:
+                    self.send_error_json("tool_approval.not_found", "tool approval not found", 404)
+                    return
+                if approval.get("status") != "pending":
+                    self.send_error_json("tool_approval.resolved", "tool approval is already resolved", 409)
+                    return
+                approval["status"] = decision
+                approval["resolved_at"] = now_iso()
+                run = next((item for item in state.get("runs", []) if item.get("id") == approval.get("run_id") and item.get("tenant_id") == tenant_id), None)
+                if decision == "rejected":
+                    if run:
+                        run["status"] = "rejected"
+                        run["message"] = "维修动作审批被拒绝"
+                        run["finished_at"] = now_iso()
+                    record_audit(state, tenant_id=tenant_id, actor_id=actor_id, action="tool.approval_rejected", resource_type="run", resource_id=approval.get("run_id", ""), metadata={"tool": approval.get("tool"), "approval_id": approval_id})
+                    save_state(state)
+                    self.send_json({"approval": approval}, 200)
+                    return
+                if not run:
+                    self.send_error_json("run.not_found", "run not found", 404)
+                    return
+                run["status"] = "running"
+                try:
+                    result = TOOL_GATEWAY.call(state, tenant_id=tenant_id, actor_id=actor_id, run_id=run["id"], tool=approval["tool"], arguments=approval.get("arguments", {}), approval_granted=True)
+                except ToolGatewayError as exc:
+                    approval["status"] = "failed"
+                    save_state(state)
+                    self.send_error_json(exc.code, exc.message, exc.status, exc.details)
+                    return
+                approval["status"] = "executed"
+                approval["result"] = result
+                run["status"] = "completed"
+                run["message"] = "维修动作已登记"
+                run["finished_at"] = now_iso()
+                record_audit(state, tenant_id=tenant_id, actor_id=actor_id, action="tool.executed", resource_type="run", resource_id=run["id"], metadata={"tool": approval.get("tool"), "approval_id": approval_id})
+                save_state(state)
+                self.send_json({"approval": approval, "result": result}, 200)
             elif path == "/api/v1/registry/scenario-packs":
                 if not self.require_role("owner", "admin"):
                     return
@@ -989,6 +1092,7 @@ class Handler(BaseHTTPRequestHandler):
                     return
                 run = {"id": f"run-{uuid.uuid4().hex[:8]}", "workflow_id": workflow_id, "tenant_id": tenant_id, "actor_id": actor_id, "runtime": DSH_RUNTIME.metadata(), "status": "queued", "message": "Workflow 已加入运行队列", "attempt": 1, "max_attempts": 3, "cancel_requested": False, "created_at": now_iso()}
                 workflow_request = DSH_RUNTIME.build_request(tenant_id=tenant_id, actor_id=actor_id, task_id=f"workflow:{workflow_id}", skill_id=workflow_id, input=payload.get("input", workflow.get("name", workflow_id)), knowledge_scope=[item["id"] for item in state["knowledge"] if item.get("pack_id") == workflow.get("pack_id")], allowed_tools=["workflow.read"], output_schema="workflow.result.v1")
+                apply_run_policy(run, workflow_request)
                 try:
                     run["runtime"] = DSH_RUNTIME.enqueue(workflow_request, run_id=run["id"])
                 except RuntimeUnavailableError as exc:
@@ -1010,6 +1114,7 @@ class Handler(BaseHTTPRequestHandler):
                 run = {"id": f"run-{uuid.uuid4().hex[:8]}", "task_id": None, "skill_id": skill_id, "tenant_id": tenant_id, "actor_id": actor_id, "runtime": DSH_RUNTIME.metadata(), "status": "queued", "duration": "", "message": "已加入运行队列", "attempt": 1, "max_attempts": 3, "cancel_requested": False, "created_at": now_iso(), "input": payload.get("input", "")}
                 skill = skill_for(skill_id)
                 skill_request = DSH_RUNTIME.build_request(tenant_id=tenant_id, actor_id=actor_id, task_id=f"skill:{skill_id}", skill_id=skill_id, input=payload.get("input", ""), knowledge_scope=[], allowed_tools=skill.get("dependencies", []), output_schema="skill.result.v1")
+                apply_run_policy(run, skill_request)
                 try:
                     run["runtime"] = DSH_RUNTIME.enqueue(skill_request, run_id=run["id"])
                 except RuntimeUnavailableError as exc:
@@ -1038,6 +1143,7 @@ class Handler(BaseHTTPRequestHandler):
                 approval_required = task.get("status") == "approval"
                 run = {"id": f"run-{uuid.uuid4().hex[:8]}", "task_id": task_id, "skill_id": task["skill_id"], "tenant_id": tenant_id, "actor_id": actor_id, "status": "queued", "duration": "", "message": "已加入运行队列", "attempt": 1, "max_attempts": 3, "cancel_requested": False, "created_at": now_iso()}
                 request = build_task_runtime_request(state, task, tenant_id=tenant_id, actor_id=actor_id, input_value=payload.get("input", task.get("input_snapshot") or task.get("name", "")), approval_required=approval_required)
+                apply_run_policy(run, request)
                 try:
                     run["runtime"] = DSH_RUNTIME.enqueue(request, run_id=run["id"])
                 except RuntimeUnavailableError as exc:

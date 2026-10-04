@@ -20,6 +20,9 @@ def test_openapi_declares_public_v1_resources_and_security_headers():
         "/api/v1/workflows/{workflow_id}/runs",
         "/api/v1/approvals/{task_id}/approve",
         "/api/v1/artifacts",
+        "/api/v1/tools",
+        "/api/v1/tools/call",
+        "/api/v1/tool-approvals/{approval_id}/approve",
     ):
         assert path in paths
     assert "bearerAuth" in document["components"]["securitySchemes"]

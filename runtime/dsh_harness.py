@@ -100,6 +100,13 @@ class DshHarnessExecutor:
             "allowed_tools": list(request.allowed_tools),
             "output_schema": request.output_schema,
             "approval_required": request.approval_required,
+            "tool_gateway": {
+                "url": request.tool_gateway_url,
+                "method": "POST",
+                "path": "/api/v1/tools/call",
+                "request": {"run_id": "<run_id>", "tool": "<declared_tool>", "arguments": {}},
+                "rule": "Every business tool call must be sent to the Tool Gateway; never call a connector directly.",
+            },
             "rules": [
                 "Only use the declared tools and knowledge scope.",
                 "Return a structured result matching output_schema.",

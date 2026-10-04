@@ -123,6 +123,11 @@ GET    /api/v1/health
 GET    /api/v1/ready
 POST   /api/v1/approvals/:id/approve
 POST   /api/v1/approvals/:id/reject
+GET    /api/v1/tools
+POST   /api/v1/tools/call
+GET    /api/v1/tool-approvals
+POST   /api/v1/tool-approvals/:id/approve
+POST   /api/v1/tool-approvals/:id/reject
 ```
 
 控制台已通过 `app.js` 读取 dashboard、runtime、knowledge、workflow、approval、run 和 Artifact API；没有 API 时才退回本地 fixture，用于离线展示。
@@ -140,10 +145,11 @@ POST   /api/v1/approvals/:id/reject
 | 产物 | `GET /api/v1/artifacts` | 结构化结果、证据包和计划文件 |
 | 审批 | `POST /api/v1/approvals/:id/approve` | 业务动作的人工确认 |
 | 审计 | `GET /api/v1/audit` | 按租户查看 Task、Run、Artifact 和审批事件 |
+| Tool Gateway | `GET /api/v1/tools`、`POST /api/v1/tools/call` | 按 Run 的 `allowed_tools`、租户和操作者校验业务工具；售后首批提供 `ticket.read`、`device.status` 和需审批的 `maintenance.action` |
 | 运行探针 | `GET /api/v1/health`、`GET /api/v1/ready` | 容器健康检查和运行时状态 |
 
 ## DSH Runtime Boundary
 
-`runtime/dsh_runtime.py` 只接受显式的租户、操作者、`task_id`、`skill_id`、知识范围、允许工具和输出 Schema。`DSH_RUNTIME_MODE=native` 时，Runtime 通过官方 `deepseek-harness-sdk` 创建受限 profile 和 session；`sidecar` 时发送相同的受控 envelope，由隔离的 Harness gateway 回调；只有显式 `demo` 时才使用本地 worker。没有 native SDK 或 sidecar endpoint 时，Runtime 报告 `unavailable`，不会伪造推理结果。Native 结果会写入 Run、Event 和 `harness-result.json` / `harness-events.jsonl` Artifact。
+`runtime/dsh_runtime.py` 只接受显式的租户、操作者、`task_id`、`skill_id`、知识范围、允许工具和输出 Schema。`DSH_RUNTIME_MODE=native` 时，Runtime 通过官方 `deepseek-harness-sdk` 创建受限 profile 和 session；`sidecar` 时发送相同的受控 envelope，由隔离的 Harness gateway 回调；只有显式 `demo` 时才使用本地 worker。没有 native SDK 或 sidecar endpoint 时，Runtime 报告 `unavailable`，不会伪造推理结果。Native prompt 和 sidecar envelope 会带出 Tool Gateway 地址，但业务工具调用必须再经过 `POST /api/v1/tools/call` 的 Run 级权限检查。Native 结果会写入 Run、Event 和 `harness-result.json` / `harness-events.jsonl` Artifact。
 
 业务写入由产品层审批，不能由运行时直接决定。运行时的 trace 可以作为 Run 证据保存，但不能覆盖 Task 状态或 Artifact 内容。

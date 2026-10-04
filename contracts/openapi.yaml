@@ -18,6 +18,7 @@ tags:
   - name: Artifacts
   - name: Events
   - name: Chat
+  - name: Tool Gateway
 paths:
   /api/v1/health:
     get:
@@ -320,6 +321,58 @@ paths:
         '201':
           description: Chat response
           content: {application/json: {schema: {type: object}}}
+  /api/v1/tools:
+    get:
+      tags: [Tool Gateway]
+      operationId: listTools
+      responses:
+        '200':
+          description: Registered business tools
+          content: {application/json: {schema: {type: array, items: {type: object}}}}
+  /api/v1/tools/call:
+    post:
+      tags: [Tool Gateway]
+      operationId: callTool
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [run_id, tool, arguments]
+              properties:
+                run_id: {type: string}
+                tool: {type: string, enum: [ticket.read, device.status, maintenance.action]}
+                arguments: {type: object}
+      responses:
+        '200': {description: Tool result, content: {application/json: {schema: {type: object}}}}
+        '202': {description: Approval requested, content: {application/json: {schema: {type: object}}}}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/v1/tool-approvals:
+    get:
+      tags: [Tool Gateway]
+      operationId: listToolApprovals
+      responses:
+        '200': {description: Tool approval queue, content: {application/json: {schema: {type: array, items: {type: object}}}}}
+  /api/v1/tool-approvals/{approval_id}/approve:
+    post:
+      tags: [Tool Gateway]
+      operationId: approveTool
+      parameters:
+        - {name: approval_id, in: path, required: true, schema: {type: string}}
+      responses:
+        '200': {description: Executed approved tool, content: {application/json: {schema: {type: object}}}}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /api/v1/tool-approvals/{approval_id}/reject:
+    post:
+      tags: [Tool Gateway]
+      operationId: rejectTool
+      parameters:
+        - {name: approval_id, in: path, required: true, schema: {type: string}}
+      responses:
+        '200': {description: Rejected tool, content: {application/json: {schema: {type: object}}}}
+        '404': {$ref: '#/components/responses/NotFound'}
   /api/v1/org/members:
     get:
       tags: [Organization]
@@ -499,6 +552,9 @@ components:
       content: {application/json: {schema: {$ref: '#/components/schemas/ErrorEnvelope'}}}
     Conflict:
       description: Idempotency conflict
+      content: {application/json: {schema: {$ref: '#/components/schemas/ErrorEnvelope'}}}
+    Forbidden:
+      description: Permission denied
       content: {application/json: {schema: {$ref: '#/components/schemas/ErrorEnvelope'}}}
     Validation:
       description: Validation error

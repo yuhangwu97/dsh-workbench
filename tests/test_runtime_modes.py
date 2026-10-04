@@ -46,3 +46,10 @@ def test_auto_mode_reports_unavailable_without_runtime(monkeypatch):
     assert runtime.configured is False
     with pytest.raises(RuntimeUnavailableError, match="DSH_RUNTIME_MODE"):
         runtime.enqueue(runtime.build_request(tenant_id="t", actor_id="a", task_id="x", skill_id="s", input="hi", knowledge_scope=["kb"], allowed_tools=["kb.search"], output_schema="task.result.v1"))
+
+
+def test_runtime_binds_tool_gateway_to_run_request(monkeypatch):
+    monkeypatch.setenv("DSH_TOOL_GATEWAY_URL", "http://workbench.test")
+    request = DshRuntime(mode="demo").build_request(tenant_id="t", actor_id="a", task_id="x", skill_id="s", input="hi", knowledge_scope=[], allowed_tools=["ticket.read"], output_schema="task.result.v1")
+    assert request.tool_gateway_url == "http://workbench.test"
+    assert DshRuntime(mode="demo").metadata()["tool_gateway"]["url"] == "http://workbench.test"

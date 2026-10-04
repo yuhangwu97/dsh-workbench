@@ -1,5 +1,5 @@
 from .dsh_harness import DshHarnessExecutor, HarnessResult, HarnessUnavailableError
-from .dsh_runtime import DshRunRequest, DshRuntime
+from .dsh_runtime import DshRunRequest, DshRuntime, RuntimeUnavailableError
 
 __all__ = [
     "DshHarnessExecutor",
@@ -7,4 +7,5 @@ __all__ = [
     "DshRuntime",
     "HarnessResult",
     "HarnessUnavailableError",
+    "RuntimeUnavailableError",
 ]

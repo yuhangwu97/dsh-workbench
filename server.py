@@ -222,6 +222,44 @@ def pack_for(pack_id: str) -> dict:
 def skill_for(skill_id: str) -> dict:
     return next((s for s in SKILLS if s["id"] == skill_id), SKILLS[0])
 
+def build_chat_response(state: dict, message: str, pack_id: str, tenant_id: str) -> dict:
+    """Return a citation-backed intake response from the selected Pack knowledge scope."""
+    hits = KNOWLEDGE_INDEX.search(state.get("knowledge_chunks", []), message, pack_id=pack_id or None, top_k=5)
+    source_map = {item["id"]: item for item in state.get("knowledge", [])}
+    document_map = {item["id"]: item for item in state.get("knowledge_documents", [])}
+    matches = []
+    citations = []
+    for hit in hits:
+        citation_id = f"cite-{uuid.uuid4().hex[:10]}"
+        source = source_map.get(hit.get("source_id"), {})
+        document = document_map.get(hit.get("document_id"), {})
+        citation = {
+            "id": citation_id,
+            "tenant_id": tenant_id,
+            "source_id": hit.get("source_id"),
+            "document_id": hit.get("document_id"),
+            "chunk_id": hit.get("id"),
+            "score": hit.get("score", 0),
+            "created_at": now_iso(),
+        }
+        citations.append(citation)
+        matches.append({
+            "type": document.get("metadata", {}).get("type", "DOC"),
+            "title": document.get("name", source.get("name", hit.get("source_id"))),
+            "detail": f"片段 {hit.get('chunk_index', 0) + 1} · 相关度 {round(hit.get('score', 0) * 100)}%",
+            "source_id": hit.get("source_id"),
+            "document_id": hit.get("document_id"),
+            "chunk_id": hit.get("id"),
+            "citation_id": citation_id,
+            "snippet": hit.get("text", "")[:320],
+        })
+    state.setdefault("citations", []).extend(citations)
+    if matches:
+        reply = f"我在“{pack_for(pack_id)['name']}”范围内找到 {len(matches)} 条相关证据，最相关的是《{matches[0]['title']}》。这些引用会随 Task 和 Artifact 保留。"
+    else:
+        reply = f"我在“{pack_for(pack_id)['name']}”范围内暂时没有找到足够证据。你可以补充设备编号、故障码或日志，再创建 Task 继续诊断。"
+    return {"reply": reply, "evidence_count": len(matches), "pack_id": pack_id, "matches": matches, "citations": citations, "embedding": KNOWLEDGE_INDEX.provider_name}
+
 def request_context(handler: BaseHTTPRequestHandler) -> tuple[str, str]:
     claims = getattr(handler, "claims", {}) or {}
     tenant_id = handler.headers.get("X-Tenant-ID", claims.get("tenant_id", claims.get("org_id", DEMO_TENANT_ID))).strip() or DEMO_TENANT_ID
@@ -798,8 +836,14 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json({"query": query, "pack_id": pack_id, "matches": matches, "citations": citations, "embedding": KNOWLEDGE_INDEX.provider_name}, 200)
             elif path == "/api/v1/chat/messages":
                 message = str(payload.get("message", "")).strip()
-                pack = pack_for(str(payload.get("pack_id", "after-sales")))
-                self.send_json({"reply": f"已收到你的问题。我会在“{pack['name']}”范围内检索证据，并可以继续创建 Task。", "evidence_count": 2, "pack_id": pack["id"]}, 201)
+                if not message:
+                    self.send_error_json("chat.message_required", "message is required", 422)
+                    return
+                pack_id = str(payload.get("pack_id", "after-sales")).strip() or "after-sales"
+                response = build_chat_response(state, message, pack_id, tenant_id)
+                record_audit(state, tenant_id=tenant_id, actor_id=actor_id, action="chat.message_received", resource_type="chat", resource_id=payload.get("conversation_id", "default"), metadata={"pack_id": pack_id, "evidence_count": response["evidence_count"]})
+                save_state(state)
+                self.send_json(response, 201)
             elif path == "/api/v1/registry/scenario-packs":
                 if not self.require_role("owner", "admin"):
                     return

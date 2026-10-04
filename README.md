@@ -227,6 +227,7 @@ For production, add OIDC/JWT, a managed database, a queue, object storage, and a
 - [x] HS256 JWT、issuer 校验、组织成员和角色权限边界
 - [x] PyPI/npm 的 tag release workflow（配置 Trusted Publishing 和 `NPM_TOKEN` 后发布）
 - [x] Scenario Pack registry、manifest 评测命令和服务端评测记录
+- [x] 控制台接入真实 dashboard/runtime/knowledge/workflow/approval/run/Artifact API，并每 5 秒刷新运行状态
 
 ## 接下来 | Next milestones
 

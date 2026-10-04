@@ -125,7 +125,7 @@ POST   /api/v1/approvals/:id/approve
 POST   /api/v1/approvals/:id/reject
 ```
 
-前端当前使用本地 fixture；将 `app.js` 中的 `packData` 和 `tasks` 替换为上述 API 数据即可接入真实服务。
+控制台已通过 `app.js` 读取 dashboard、runtime、knowledge、workflow、approval、run 和 Artifact API；没有 API 时才退回本地 fixture，用于离线展示。
 
 ## 前端入口与后端接口映射
 

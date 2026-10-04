@@ -166,16 +166,70 @@ function renderArtifactCards(artifactMap) {
     card.append(icon, body, open); grid.append(card)
   })
 }
+function renderKnowledgeSources(sources) {
+  const table = document.querySelector('.knowledge-table'); if (!table) return
+  const head = table.querySelector('.table-head'); table.replaceChildren(head)
+  ;(sources || []).forEach(source => {
+    const row = document.createElement('button'); row.className = 'table-row'; row.type = 'button'; row.dataset.action = 'open-knowledge'
+    const pack = packData[source.pack_id] || packData['after-sales']
+    row.innerHTML = `<span><strong>${source.name || source.id}</strong><small>${source.id} · ${source.documents || 0} docs</small></span><span class="table-pack"><i class="pack-color ${pack.color}"></i>${pack.name}</span><span>${source.documents || 0}</span><span class="state-pill ${source.status === 'ready' ? 'state-done' : 'state-review'}">${source.status === 'ready' ? '已就绪' : source.status || '索引中'}</span><span>›</span>`
+    row.addEventListener('click', () => { setPage('knowledge'); showToast(`已打开知识源：${source.name || source.id}`) }); table.append(row)
+  })
+}
+function renderWorkflowList(workflows) {
+  const list = document.querySelector('.workflow-list'); if (!list) return
+  const head = list.querySelector('.panel-heading'); list.replaceChildren(head)
+  ;(workflows || []).forEach(workflow => {
+    const item = document.createElement('button'); item.className = 'workflow-item'; item.type = 'button'
+    const pack = packData[workflow.pack_id] || packData['after-sales']; item.innerHTML = `<span class="workflow-mark ${pack.color === 'pack-green' ? 'mark-green' : pack.color === 'pack-blue' ? 'mark-blue' : 'mark-orange'}"></span><span><strong>${workflow.name || workflow.id}</strong><small>${workflow.steps || 0} steps · ${workflow.status || 'draft'}</small></span><span>›</span>`
+    item.addEventListener('click', () => showToast(`已选择工作流：${workflow.name || workflow.id}`)); list.append(item)
+  })
+}
+function renderApprovalList(approvals) {
+  const list = document.querySelector('.approval-list'); if (!list) return
+  list.replaceChildren()
+  if (!(approvals || []).length) { const empty = document.createElement('p'); empty.className = 'drawer-copy'; empty.textContent = '当前没有待处理审批。'; list.append(empty); return }
+  approvals.forEach(approval => {
+    const item = document.createElement('article'); item.className = 'approval-item'; item.innerHTML = `<div class="approval-item-head"><span class="state-pill ${approval.status === 'pending' ? 'state-warning' : 'state-done'}">${approval.status === 'pending' ? '待处理' : approval.status}</span></div><h3>${approval.task_id || approval.id}</h3><p>${approval.reason || '业务动作需要人工确认'}</p>`
+    if (approval.status === 'pending') {
+      const actions = document.createElement('div'); actions.className = 'approval-actions'
+      const reject = document.createElement('button'); reject.className = 'secondary-button'; reject.dataset.action = 'reject-approval'; reject.dataset.approvalTask = approval.task_id; reject.textContent = '拒绝'
+      const approve = document.createElement('button'); approve.className = 'primary-button'; approve.dataset.action = 'approve-approval'; approve.dataset.approvalTask = approval.task_id; approve.textContent = '批准并继续'
+      actions.append(reject, approve); item.append(actions)
+      ;[reject, approve].forEach(button => button.addEventListener('click', async () => {
+        const decision = button.dataset.action === 'approve-approval' ? 'approve' : 'reject';
+        try { await apiRequest(`/api/v1/approvals/${encodeURIComponent(approval.task_id)}/${decision}`, { method: 'POST', body: '{}' }); await bootstrapFromApi(); showToast(decision === 'approve' ? '审批已通过。' : '已拒绝本次业务动作。') } catch (error) { showToast('审批接口暂时不可用') }
+      }))
+    }
+    list.append(item)
+  })
+}
+function renderRuntime(runtime) {
+  const environment = document.querySelector('.environment'); if (!environment) return
+  const mode = runtime?.mode || 'unavailable'; const label = mode === 'native' ? 'Native Harness' : mode === 'sidecar' ? 'Harness Sidecar' : mode === 'demo' ? 'Demo runtime' : 'Harness unavailable'
+  environment.innerHTML = `<span class="status-dot ${mode === 'unavailable' ? 'pack-orange' : 'dot-green'}"></span>${label}`
+}
+
 async function bootstrapFromApi() {
   try {
-    const dashboard = await apiRequest('/api/v1/dashboard')
-    apiOnline = true; renderTaskRows(dashboard.tasks); renderRunRows(dashboard.runs); renderArtifactCards(dashboard.artifacts)
+    const [dashboard, runtime] = await Promise.all([apiRequest('/api/v1/dashboard'), apiRequest('/api/v1/runtime')])
+    apiOnline = true
+    renderRuntime(runtime)
+    renderTaskRows(dashboard.tasks); renderRunRows(dashboard.runs); renderArtifactCards(dashboard.artifacts)
+    renderKnowledgeSources(dashboard.knowledge); renderWorkflowList(dashboard.workflows); renderApprovalList(dashboard.approvals)
     document.querySelectorAll('.metric-value')[0].textContent = dashboard.metrics.open_tasks
     document.querySelectorAll('.metric-value')[2].innerHTML = `${dashboard.metrics.completion_rate}<span class="metric-unit">%</span>`
     document.querySelectorAll('.metric-value')[3].textContent = dashboard.metrics.waiting_approval
     const approvalCount = document.querySelector('.approval-summary strong'); if (approvalCount) approvalCount.textContent = String((dashboard.approvals || []).filter(item => item.status === 'pending').length)
-    document.querySelector('.environment').innerHTML = '<span class="status-dot dot-green"></span> API connected'
-  } catch (error) { if (error.status === 401) requestAuth(); else console.info('API unavailable; using local fixture', error) }
+  } catch (error) {
+    if (error.status === 401) requestAuth()
+    else { apiOnline = false; renderRuntime({ mode: 'unavailable' }); console.info('API unavailable; using local fixture', error) }
+  }
+}
+let refreshTimer
+function startLiveRefresh() {
+  window.clearInterval(refreshTimer)
+  refreshTimer = window.setInterval(() => { if (apiOnline && !document.hidden) bootstrapFromApi() }, 5000)
 }
 
 function openNewTask(prefill = '') { const input = taskModal.querySelector('#new-task-input'); input.value = prefill; taskModal.querySelector('#new-task-name').focus(); taskModal.showModal() }
@@ -276,11 +330,13 @@ document.querySelectorAll('[data-action]').forEach(button => button.addEventList
   if (action === 'export-runs' || action === 'export-artifacts') showToast('导出任务已准备，下一步生成 CSV / JSON 文件。')
 }))
 
-function updateEvidence(matches) {
-  const list = document.querySelector('.evidence-list'); if (!list || !matches?.length) return
-  const note = list.querySelector('.evidence-note'); list.replaceChildren()
+function updateEvidence(matches = []) {
+  const list = document.querySelector('.evidence-list'); if (!list) return
+  const note = list.querySelector('.evidence-note') || document.createElement('div'); note.className = 'evidence-note'; note.innerHTML = '<span class="status-dot dot-green"></span><p>证据会在 Task 和 Artifact 中保留引用。</p>'
+  list.replaceChildren()
+  if (!matches.length) { const empty = document.createElement('p'); empty.className = 'drawer-copy'; empty.textContent = '当前场景包没有找到可引用证据。'; list.append(empty, note); const count = document.querySelector('.evidence-count'); if (count) count.textContent = '0'; return }
   matches.forEach(item => { const button = document.createElement('button'); button.className = 'evidence-item'; button.type = 'button'; button.dataset.action = 'open-knowledge'; button.innerHTML = `<span class="evidence-type">${item.type}</span><span><strong>${item.title}</strong><small>${item.detail}</small></span><span>›</span>`; button.addEventListener('click', () => { setPage('knowledge'); showToast('已打开证据源目录') }); list.append(button) })
-  if (note) list.append(note)
+  list.append(note)
   const count = document.querySelector('.evidence-count'); if (count) count.textContent = String(matches.length)
 }
 
@@ -294,15 +350,14 @@ document.querySelector('#chat-form')?.addEventListener('submit', async event => 
   let reply = '我已经收到这个问题。可以继续检索证据，或将当前会话转为 Task。'
   const packId = document.querySelector('#chat-pack').value
   if (apiOnline) { try {
-    const evidence = await apiRequest('/api/v1/knowledge/search', { method: 'POST', body: JSON.stringify({ query: message, pack_id: packId }) })
-    updateEvidence(evidence.matches)
     const result = await apiRequest('/api/v1/chat/messages', { method: 'POST', body: JSON.stringify({ message, pack_id: packId }) })
+    updateEvidence(result.matches)
     reply = result.reply
-  } catch (error) { reply = '消息已记录，但当前运行服务暂时不可用。' } }
+  } catch (error) { reply = error.status === 503 ? '当前没有可用的 Harness runtime，请先配置运行时。' : '消息已记录，但当前运行服务暂时不可用。' } }
   messages.insertAdjacentHTML('beforeend', `<div class="chat-message message-assistant"><div class="chat-avatar">D</div><div><p>${reply.replace(/[<>]/g, '')}</p><small>已记录上下文 · 已检索证据 · 可转为 Task</small></div></div>`)
   messages.scrollTop = messages.scrollHeight
 })
 
 const savedPack = localStorage.getItem('dsh-active-pack'); if (savedPack && packData[savedPack]) setActivePack(savedPack)
 const initialPage = window.location.hash.slice(1); if (pageLabels[initialPage]) setPage(initialPage)
-bootstrapFromApi()
+bootstrapFromApi().then(startLiveRefresh)

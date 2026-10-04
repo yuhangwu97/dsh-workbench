@@ -18,4 +18,4 @@ run = client.tasks.run(task.id)
 completed = client.runs.wait(run.id)
 ```
 
-Run controls are available through `client.runs.cancel(run_id)`, `client.runs.retry(run_id)`, and `client.runs.queue()`. Search responses include `citations` and `citation_id` values that can be attached to an Artifact.
+Run controls are available through `client.runs.cancel(run_id)`, `client.runs.retry(run_id)`, and `client.runs.queue()`. Scenario Packs and org access are available through `client.scenario_packs` and `client.organization`. Search responses include `citations` and `citation_id` values that can be attached to an Artifact.

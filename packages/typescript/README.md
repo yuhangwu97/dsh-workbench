@@ -18,4 +18,4 @@ const run = await client.tasks.run(task.id);
 const completed = await client.wait(run.id);
 ```
 
-Run controls are available through `client.runs.cancel(runId)`, `client.runs.retry(runId)`, and `client.runs.queue()`. Search responses include `citations` and `citation_id` values for traceable Artifacts.
+Run controls are available through `client.runs.cancel(runId)`, `client.runs.retry(runId)`, and `client.runs.queue()`. Scenario Packs and org access are available through `client.scenarioPacks` and `client.organization`. Search responses include `citations` and `citation_id` values for traceable Artifacts.

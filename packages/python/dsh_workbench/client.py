@@ -87,6 +87,8 @@ class DSHClient:
         self.workflows = WorkflowsResource(self)
         self.approvals = ApprovalsResource(self)
         self.artifacts = ArtifactsResource(self)
+        self.scenario_packs = ScenarioPacksResource(self)
+        self.organization = OrganizationResource(self)
 
     def _request(self, method: str, path: str, payload: Any | None = None, *, idempotency_key: str | None = None) -> Any:
         request_id = self.headers.get("X-Request-ID") or f"req_{uuid.uuid4().hex[:16]}"
@@ -225,6 +227,34 @@ class ApprovalsResource:
         return self.client._request("POST", f"/api/v1/approvals/{quote(task_id, safe='')}/reject", {})
 
 
+class ScenarioPacksResource:
+    def __init__(self, client: DSHClient) -> None:
+        self.client = client
+
+    def list(self) -> list[dict[str, Any]]:
+        return _items(self.client._request("GET", "/api/v1/scenario-packs"))
+
+    def registry(self) -> dict[str, Any]:
+        return self.client._request("GET", "/api/v1/registry/scenario-packs")
+
+    def register(self, *, pack_id: str, version: str, manifest: str, idempotency_key: str | None = None) -> dict[str, Any]:
+        return self.client._request("POST", "/api/v1/registry/scenario-packs", {"id": pack_id, "version": version, "manifest": manifest}, idempotency_key=idempotency_key)
+
+    def evaluate(self, pack_id: str) -> dict[str, Any]:
+        return self.client._request("POST", f"/api/v1/scenario-packs/{quote(pack_id, safe='')}/evaluations", {})
+
+
+class OrganizationResource:
+    def __init__(self, client: DSHClient) -> None:
+        self.client = client
+
+    def list_members(self) -> list[dict[str, Any]]:
+        return _items(self.client._request("GET", "/api/v1/org/members"))
+
+    def invite(self, *, email: str, role: str = "viewer", idempotency_key: str | None = None) -> dict[str, Any]:
+        return self.client._request("POST", "/api/v1/org/members", {"email": email, "role": role}, idempotency_key=idempotency_key)
+
+
 class ArtifactsResource:
     def __init__(self, client: DSHClient) -> None:
         self.client = client
@@ -257,6 +287,8 @@ class AsyncDSHClient:
         self.workflows = _AsyncWorkflows(self._sync.workflows)
         self.approvals = _AsyncApprovals(self._sync.approvals)
         self.artifacts = _AsyncArtifacts(self._sync.artifacts)
+        self.scenario_packs = _AsyncScenarioPacks(self._sync.scenario_packs)
+        self.organization = _AsyncOrganization(self._sync.organization)
 
 
 class _AsyncMethod:
@@ -295,6 +327,24 @@ class _AsyncApprovals:
 
     async def approve(self, task_id: str) -> dict[str, Any]: return await asyncio.to_thread(self.resource.approve, task_id)
     async def reject(self, task_id: str) -> dict[str, Any]: return await asyncio.to_thread(self.resource.reject, task_id)
+
+
+class _AsyncScenarioPacks:
+    def __init__(self, resource: ScenarioPacksResource) -> None:
+        self.resource = resource
+
+    async def list(self) -> list[dict[str, Any]]: return await asyncio.to_thread(self.resource.list)
+    async def registry(self) -> dict[str, Any]: return await asyncio.to_thread(self.resource.registry)
+    async def register(self, **kwargs: Any) -> dict[str, Any]: return await asyncio.to_thread(self.resource.register, **kwargs)
+    async def evaluate(self, pack_id: str) -> dict[str, Any]: return await asyncio.to_thread(self.resource.evaluate, pack_id)
+
+
+class _AsyncOrganization:
+    def __init__(self, resource: OrganizationResource) -> None:
+        self.resource = resource
+
+    async def list_members(self) -> list[dict[str, Any]]: return await asyncio.to_thread(self.resource.list_members)
+    async def invite(self, **kwargs: Any) -> dict[str, Any]: return await asyncio.to_thread(self.resource.invite, **kwargs)
 
 
 class _AsyncArtifacts:

@@ -29,6 +29,8 @@ export class DSHClient {
   readonly workflows: WorkflowsResource;
   readonly approvals: ApprovalsResource;
   readonly artifacts: ArtifactsResource;
+  readonly scenarioPacks: ScenarioPacksResource;
+  readonly organization: OrganizationResource;
   private readonly baseUrl: string;
   private readonly options: DSHClientOptions;
   private readonly fetchImpl: typeof fetch;
@@ -45,6 +47,8 @@ export class DSHClient {
     this.workflows = new WorkflowsResource(this);
     this.approvals = new ApprovalsResource(this);
     this.artifacts = new ArtifactsResource(this);
+    this.scenarioPacks = new ScenarioPacksResource(this);
+    this.organization = new OrganizationResource(this);
   }
 
   async request<T>(method: string, path: string, body?: unknown, idempotencyKey?: string): Promise<T> {
@@ -123,6 +127,20 @@ class ApprovalsResource {
   constructor(private readonly client: DSHClient) {}
   approve(taskId: string): Promise<Record<string, unknown>> { return this.client.request('POST', `/api/v1/approvals/${encodeURIComponent(taskId)}/approve`, {}); }
   reject(taskId: string): Promise<Record<string, unknown>> { return this.client.request('POST', `/api/v1/approvals/${encodeURIComponent(taskId)}/reject`, {}); }
+}
+
+class ScenarioPacksResource {
+  constructor(private readonly client: DSHClient) {}
+  list(): Promise<Array<Record<string, unknown>>> { return this.client.request('GET', '/api/v1/scenario-packs'); }
+  registry(): Promise<{ registry_version: string; packs: Array<Record<string, unknown>> }> { return this.client.request('GET', '/api/v1/registry/scenario-packs'); }
+  register(input: { packId: string; version: string; manifest: string; idempotencyKey?: string }): Promise<Record<string, unknown>> { return this.client.request('POST', '/api/v1/registry/scenario-packs', { id: input.packId, version: input.version, manifest: input.manifest }, input.idempotencyKey); }
+  evaluate(packId: string): Promise<Record<string, unknown>> { return this.client.request('POST', `/api/v1/scenario-packs/${encodeURIComponent(packId)}/evaluations`, {}); }
+}
+
+class OrganizationResource {
+  constructor(private readonly client: DSHClient) {}
+  listMembers(): Promise<Array<Record<string, unknown>>> { return this.client.request('GET', '/api/v1/org/members'); }
+  invite(email: string, role = 'viewer', idempotencyKey?: string): Promise<Record<string, unknown>> { return this.client.request('POST', '/api/v1/org/members', { email, role }, idempotencyKey); }
 }
 
 class ArtifactsResource {

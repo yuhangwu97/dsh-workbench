@@ -204,13 +204,21 @@ Ships today: the reference console, API and Schema contracts, Python/TypeScript 
 
 For production, add OIDC/JWT, a managed database, a queue, object storage, a real Knowledge Provider, and a configured DSH endpoint. The `local-demo` executor is for product walkthroughs; it does not pretend to be model inference.
 
+## 现在已经可以继续什么 | What is already wired
+
+- [x] Knowledge ingestion、chunk embedding 和 citation records（默认 `local-hash-v1`，可替换 Provider）
+- [x] Run queue 状态、并发上限、取消、重试和最大尝试次数
+- [x] HS256 JWT、issuer 校验、组织成员和角色权限边界
+- [x] PyPI/npm 的 tag release workflow（配置 Trusted Publishing 和 `NPM_TOKEN` 后发布）
+- [x] Scenario Pack manifest 评测命令和服务端评测记录
+
 ## 接下来 | Next milestones
 
-- [ ] 真实 Knowledge ingestion、Embedding 和引用追踪
-- [ ] 队列、重试、取消和并发配额
-- [ ] OIDC/JWT、组织成员和细粒度权限
-- [ ] 发布到 PyPI 和 npm
-- [ ] Scenario Pack 注册和评测体系
+- [ ] 接入真实 embedding / rerank 服务和异步 ingestion worker
+- [ ] 把本地线程队列替换为 Redis、SQS 或 Kafka worker
+- [ ] 增加 OIDC discovery、JWKS rotation 和组织级权限策略
+- [ ] 发布第一个公开 PyPI/npm 版本
+- [ ] 建立可安装的 Scenario Pack registry 和离线评测集
 
 ## 仓库结构 | Repository map
 

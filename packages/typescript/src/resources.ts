@@ -1,4 +1,4 @@
-export type RunStatus = 'queued' | 'running' | 'completed' | 'waiting_approval' | 'failed' | 'rejected';
+export type RunStatus = 'queued' | 'running' | 'completed' | 'waiting_approval' | 'failed' | 'rejected' | 'cancelled';
 
 export interface Task {
   id: string;
@@ -44,8 +44,19 @@ export interface ChatResponse {
 
 export interface KnowledgeSearchResponse {
   query: string;
-  pack_id: string;
+  pack_id?: string | null;
   matches: Array<Record<string, unknown>>;
+  citations?: Array<Record<string, unknown>>;
+  [key: string]: unknown;
+}
+
+export interface KnowledgeSource {
+  id: string;
+  name: string;
+  pack_id: string;
+  documents?: number;
+  chunks?: number;
+  status?: string;
   [key: string]: unknown;
 }
 
@@ -55,5 +66,5 @@ export interface Page<T> {
 }
 
 export function isTerminalRun(run: Pick<Run, 'status'>): boolean {
-  return run.status === 'completed' || run.status === 'failed' || run.status === 'rejected';
+  return run.status === 'completed' || run.status === 'failed' || run.status === 'rejected' || run.status === 'cancelled';
 }

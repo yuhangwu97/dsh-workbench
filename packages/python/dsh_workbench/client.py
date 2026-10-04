@@ -152,6 +152,15 @@ class RunsResource:
         payload = self.client._request("GET", f"/api/v1/runs{_query(page_size=page_size, page_token=page_token)}")
         return Page(items=[Run.from_dict(item) for item in _items(payload)], next_page_token=payload.get("next_page_token") if isinstance(payload, dict) else None)
 
+    def cancel(self, run_id: str) -> Run:
+        return Run.from_dict(self.client._request("POST", f"/api/v1/runs/{quote(run_id, safe='')}/cancel", {}))
+
+    def retry(self, run_id: str) -> Run:
+        return Run.from_dict(self.client._request("POST", f"/api/v1/runs/{quote(run_id, safe='')}/retry", {}))
+
+    def queue(self) -> dict[str, Any]:
+        return self.client._request("GET", "/api/v1/queue")
+
     def wait(self, run_id: str, *, timeout: float = 300.0, poll_interval: float | None = None) -> Run:
         deadline = time.monotonic() + timeout
         interval = self.client.poll_interval if poll_interval is None else max(0.0, poll_interval)
@@ -176,6 +185,19 @@ class ChatResource:
 class KnowledgeResource:
     def __init__(self, client: DSHClient) -> None:
         self.client = client
+
+    def list_sources(self) -> list[dict[str, Any]]:
+        return _items(self.client._request("GET", "/api/v1/knowledge/sources"))
+
+    def ingest(self, *, name: str, content: str, pack_id: str = "after-sales", source_id: str | None = None, document_id: str | None = None, metadata: Mapping[str, Any] | None = None, idempotency_key: str | None = None) -> dict[str, Any]:
+        payload: dict[str, Any] = {"name": name, "content": content, "pack_id": pack_id}
+        if source_id: payload["source_id"] = source_id
+        if document_id: payload["document_id"] = document_id
+        if metadata is not None: payload["metadata"] = dict(metadata)
+        return self.client._request("POST", "/api/v1/knowledge/ingest", payload, idempotency_key=idempotency_key)
+
+    def citations(self) -> list[dict[str, Any]]:
+        return _items(self.client._request("GET", "/api/v1/knowledge/citations"))
 
     def search(self, query: str, *, pack_id: str = "after-sales", top_k: int | None = None) -> dict[str, Any]:
         payload: dict[str, Any] = {"query": query, "pack_id": pack_id}
@@ -261,6 +283,9 @@ class _AsyncRuns:
 
     async def get(self, run_id: str) -> Run: return await asyncio.to_thread(self.resource.get, run_id)
     async def list(self, **kwargs: Any) -> list[Run]: return await asyncio.to_thread(self.resource.list, **kwargs)
+    async def cancel(self, run_id: str) -> Run: return await asyncio.to_thread(self.resource.cancel, run_id)
+    async def retry(self, run_id: str) -> Run: return await asyncio.to_thread(self.resource.retry, run_id)
+    async def queue(self) -> dict[str, Any]: return await asyncio.to_thread(self.resource.queue)
     async def wait(self, run_id: str, **kwargs: Any) -> Run: return await asyncio.to_thread(self.resource.wait, run_id, **kwargs)
 
 

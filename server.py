@@ -17,6 +17,9 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from runtime.dsh_runtime import DshRuntime
+from runtime.knowledge import KnowledgeIndex
+from runtime.security import roles_from_claims, verify_hs256
+from tools_evaluate_packs import evaluate as evaluate_pack_manifest
 
 ROOT = Path(__file__).resolve().parent
 STATE_PATH = Path(os.getenv("WORKBENCH_STATE_PATH", str(ROOT / "data" / "state.json")))
@@ -29,6 +32,11 @@ DEMO_ACTOR_ID = "user-wu-yuhang"
 AUTH_TOKEN = os.getenv("WORKBENCH_AUTH_TOKEN", "").strip()
 DSH_CALLBACK_SECRET = os.getenv("DSH_CALLBACK_SECRET", "").strip()
 CALLBACK_MAX_SKEW = int(os.getenv("DSH_CALLBACK_MAX_SKEW", "300"))
+JWT_SECRET = os.getenv("WORKBENCH_JWT_SECRET", "").strip()
+OIDC_ISSUER = os.getenv("WORKBENCH_OIDC_ISSUER", "").strip()
+MAX_CONCURRENCY = max(1, int(os.getenv("WORKBENCH_MAX_CONCURRENCY", "4")))
+RUN_SEMAPHORE = threading.BoundedSemaphore(MAX_CONCURRENCY)
+KNOWLEDGE_INDEX = KnowledgeIndex()
 
 PACKS = [
     {"id": "after-sales", "name": "售后诊断", "color": "green", "status": "enabled", "skills": 8, "workflows": 3, "knowledge_bases": 4, "description": "面向售后团队的设备问题定位、证据收集和维修建议。"},
@@ -51,6 +59,15 @@ def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 def seed_state() -> dict:
+    knowledge_documents = [
+        {"id": "doc-product-manual-001", "source_id": "product-manuals", "name": "Cooling System Manual", "pack_id": "after-sales", "content": "E-204 indicates a cooling loop interruption. Check the cooling pump power, filter obstruction, and coolant level before replacing the controller.", "metadata": {"type": "PDF", "page": 42}},
+        {"id": "doc-ticket-8812", "source_id": "historical-tickets", "name": "历史工单 #8812", "pack_id": "after-sales", "content": "设备 2987 reported E-204 under high load. The field team restored service after cleaning the filter and replacing the pump relay.", "metadata": {"type": "TKT", "ticket_id": "8812"}},
+        {"id": "doc-repository-001", "source_id": "repository-docs", "name": "Repository Docs", "pack_id": "engineering", "content": "API compatibility checks should run before changing public task fields. Record the affected endpoint and add a migration note.", "metadata": {"type": "DOC"}},
+        {"id": "doc-runbook-001", "source_id": "runbooks", "name": "Service Runbooks", "pack_id": "operations", "content": "For repeated payment latency alerts, confirm the affected region, page the service owner, and request approval before changing traffic policy.", "metadata": {"type": "RUN"}},
+    ]
+    knowledge_chunks = []
+    for document in knowledge_documents:
+        knowledge_chunks.extend(KNOWLEDGE_INDEX.ingest(document, document["content"]))
     return {
         "tasks": SEED_TASKS.copy(),
         "runs": [
@@ -73,6 +90,11 @@ def seed_state() -> dict:
             {"id": "repository-docs", "name": "Repository Docs", "pack_id": "engineering", "documents": 86, "status": "indexing", "updated": "12 分钟前"},
             {"id": "runbooks", "name": "Service Runbooks", "pack_id": "operations", "documents": 42, "status": "ready", "updated": "3 天前"},
         ],
+        "knowledge_documents": knowledge_documents,
+        "knowledge_chunks": knowledge_chunks,
+        "citations": [],
+        "org_members": [{"id": DEMO_ACTOR_ID, "email": "yuhang@example.com", "role": "owner", "status": "active"}],
+        "pack_evaluations": [],
         "workflows": [
             {"id": "diagnose-equipment-v2", "name": "售后诊断 v2", "pack_id": "after-sales", "steps": 5, "status": "published"},
             {"id": "issue-to-patch-plan", "name": "Issue to Patch Plan", "pack_id": "engineering", "steps": 4, "status": "published"},
@@ -115,7 +137,7 @@ def load_state() -> dict:
     try:
         seed = seed_state()
         changed = False
-        for key in ("knowledge", "workflows"):
+        for key in ("knowledge", "knowledge_documents", "knowledge_chunks", "citations", "org_members", "pack_evaluations", "workflows"):
             if key not in state:
                 state[key] = seed[key]
                 changed = True
@@ -125,6 +147,16 @@ def load_state() -> dict:
         if "idempotency" not in state or not isinstance(state["idempotency"], dict):
             state["idempotency"] = {}
             changed = True
+        for run in state.get("runs", []):
+            if "attempt" not in run:
+                run["attempt"] = 1
+                changed = True
+            if "max_attempts" not in run:
+                run["max_attempts"] = 3
+                changed = True
+            if "cancel_requested" not in run:
+                run["cancel_requested"] = False
+                changed = True
         for task in state.get("tasks", []):
             if "input_snapshot" not in task:
                 task["input_snapshot"] = task.get("name", "")
@@ -178,8 +210,9 @@ def skill_for(skill_id: str) -> dict:
     return next((s for s in SKILLS if s["id"] == skill_id), SKILLS[0])
 
 def request_context(handler: BaseHTTPRequestHandler) -> tuple[str, str]:
-    tenant_id = handler.headers.get("X-Tenant-ID", DEMO_TENANT_ID).strip() or DEMO_TENANT_ID
-    actor_id = handler.headers.get("X-Actor-ID", DEMO_ACTOR_ID).strip() or DEMO_ACTOR_ID
+    claims = getattr(handler, "claims", {}) or {}
+    tenant_id = handler.headers.get("X-Tenant-ID", claims.get("tenant_id", claims.get("org_id", DEMO_TENANT_ID))).strip() or DEMO_TENANT_ID
+    actor_id = handler.headers.get("X-Actor-ID", claims.get("sub", DEMO_ACTOR_ID)).strip() or DEMO_ACTOR_ID
     return tenant_id[:80], actor_id[:80]
 
 def record_audit(state: dict, *, tenant_id: str, actor_id: str, action: str, resource_type: str, resource_id: str, metadata: dict | None = None) -> None:
@@ -195,61 +228,99 @@ def record_audit(state: dict, *, tenant_id: str, actor_id: str, action: str, res
     })
 
 def schedule_local_run(run_id: str, *, task_id: str | None = None, workflow_id: str | None = None) -> None:
-    """Advance a demo run in the background so the product has a real lifecycle."""
+    """Advance a demo run with bounded concurrency and cancellation checks."""
     def worker() -> None:
-        with LOCK:
-            state = load_state()
-            run = next((item for item in state["runs"] if item["id"] == run_id), None)
-            if not run:
-                return
-            run["status"] = "running"
-            run["started_at"] = now_iso()
-            run["message"] = "运行时正在执行"
-            if task_id:
-                task = next((item for item in state["tasks"] if item["id"] == task_id), None)
-                if task:
-                    approval_required = run.get("runtime", {}).get("approval_required")
-                    task["status"] = "approval" if approval_required else "running"
-                    task["status_label"] = "需审批" if approval_required else "进行中"
-                    task["updated"] = "刚刚"
-            save_state(state)
+        with RUN_SEMAPHORE:
+            try:
+                worker_attempt = None
+                with LOCK:
+                    state = load_state()
+                    run = next((item for item in state["runs"] if item["id"] == run_id), None)
+                    worker_attempt = int(run.get("attempt", 1)) if run else None
+                    if not run or run.get("cancel_requested"):
+                        if run:
+                            run["status"] = "cancelled"
+                            run["finished_at"] = now_iso()
+                            run["message"] = "运行已取消"
+                            save_state(state)
+                        return
+                    run["status"] = "running"
+                    run["started_at"] = now_iso()
+                    run["message"] = f"运行时正在执行 · 第 {run.get('attempt', 1)} 次"
+                    if task_id:
+                        task = next((item for item in state["tasks"] if item["id"] == task_id), None)
+                        if task:
+                            approval_required = run.get("runtime", {}).get("approval_required")
+                            task["status"] = "approval" if approval_required else "running"
+                            task["status_label"] = "需审批" if approval_required else "进行中"
+                            task["updated"] = "刚刚"
+                    save_state(state)
 
-        # Keep the demo deterministic while making the state transition observable.
-        threading.Event().wait(0.8)
+                threading.Event().wait(0.8)
 
-        with LOCK:
-            state = load_state()
-            run = next((item for item in state["runs"] if item["id"] == run_id), None)
-            if not run:
-                return
-            task = next((item for item in state["tasks"] if item["id"] == task_id), None) if task_id else None
-            if task and run.get("runtime", {}).get("approval_required"):
-                run["status"] = "waiting_approval"
-                run["message"] = "业务动作需要审批"
-                run["finished_at"] = now_iso()
-                task["status"] = "approval"
-                task["status_label"] = "需审批"
-            elif task:
-                run["status"] = "completed"
-                run["duration"] = "0.8s"
-                run["message"] = "已生成结构化结果和证据包"
-                run["finished_at"] = now_iso()
-                task["status"] = "completed"
-                task["status_label"] = "已完成"
-                task["updated"] = "刚刚"
-                task["copy"] = "运行已完成，结果已保存为 Artifact，可继续查看证据和执行轨迹。"
-                artifact_base = f"{task_id}-{run_id}"
-                state["artifacts"].setdefault(task_id, []).extend([
-                    {"name": f"{artifact_base}.json", "type": "json", "description": "结构化运行结果 · 12 KB", "run_id": run_id, "tenant_id": run.get("tenant_id", DEMO_TENANT_ID)},
-                    {"name": f"{artifact_base}-evidence.md", "type": "evidence", "description": "知识库引用和执行证据 · 6 KB", "run_id": run_id, "tenant_id": run.get("tenant_id", DEMO_TENANT_ID)},
-                ])
-            else:
-                run["status"] = "completed"
-                run["duration"] = "0.8s"
-                run["message"] = "Workflow 运行完成"
-                run["finished_at"] = now_iso()
-            record_audit(state, tenant_id=run.get("tenant_id", DEMO_TENANT_ID), actor_id=run.get("actor_id", DEMO_ACTOR_ID), action=f"run.{run['status']}", resource_type="run", resource_id=run_id, metadata={"task_id": task_id, "workflow_id": workflow_id})
-            save_state(state)
+                with LOCK:
+                    state = load_state()
+                    run = next((item for item in state["runs"] if item["id"] == run_id), None)
+                    if not run:
+                        return
+                    if run.get("attempt") != worker_attempt:
+                        return
+                    if run.get("cancel_requested"):
+                        run["status"] = "cancelled"
+                        run["message"] = "运行已取消"
+                        run["finished_at"] = now_iso()
+                        if task_id:
+                            task = next((item for item in state["tasks"] if item["id"] == task_id), None)
+                            if task:
+                                task["status"] = "cancelled"
+                                task["status_label"] = "已取消"
+                        record_audit(state, tenant_id=run.get("tenant_id", DEMO_TENANT_ID), actor_id=run.get("actor_id", DEMO_ACTOR_ID), action="run.cancelled", resource_type="run", resource_id=run_id, metadata={"task_id": task_id})
+                        save_state(state)
+                        return
+                    task = next((item for item in state["tasks"] if item["id"] == task_id), None) if task_id else None
+                    if task and run.get("runtime", {}).get("approval_required"):
+                        run["status"] = "waiting_approval"
+                        run["message"] = "业务动作需要审批"
+                        run["finished_at"] = now_iso()
+                        task["status"] = "approval"
+                        task["status_label"] = "需审批"
+                    elif task:
+                        run["status"] = "completed"
+                        run["duration"] = "0.8s"
+                        run["message"] = "已生成结构化结果和证据包"
+                        run["finished_at"] = now_iso()
+                        task["status"] = "completed"
+                        task["status_label"] = "已完成"
+                        task["updated"] = "刚刚"
+                        task["copy"] = "运行已完成，结果已保存为 Artifact，可继续查看证据和执行轨迹。"
+                        artifact_base = f"{task_id}-{run_id}"
+                        state["artifacts"].setdefault(task_id, []).extend([
+                            {"name": f"{artifact_base}.json", "type": "json", "description": "结构化运行结果 · 12 KB", "run_id": run_id, "tenant_id": run.get("tenant_id", DEMO_TENANT_ID)},
+                            {"name": f"{artifact_base}-evidence.md", "type": "evidence", "description": "知识库引用和执行证据 · 6 KB", "run_id": run_id, "tenant_id": run.get("tenant_id", DEMO_TENANT_ID)},
+                        ])
+                    else:
+                        run["status"] = "completed"
+                        run["duration"] = "0.8s"
+                        run["message"] = "Workflow 运行完成"
+                        run["finished_at"] = now_iso()
+                    record_audit(state, tenant_id=run.get("tenant_id", DEMO_TENANT_ID), actor_id=run.get("actor_id", DEMO_ACTOR_ID), action=f"run.{run['status']}", resource_type="run", resource_id=run_id, metadata={"task_id": task_id, "workflow_id": workflow_id})
+                    save_state(state)
+            except Exception as exc:
+                with LOCK:
+                    state = load_state()
+                    run = next((item for item in state["runs"] if item["id"] == run_id), None)
+                    if not run:
+                        return
+                    run["status"] = "failed"
+                    run["message"] = str(exc)[:500]
+                    run["finished_at"] = now_iso()
+                    if task_id:
+                        task = next((item for item in state["tasks"] if item["id"] == task_id), None)
+                        if task:
+                            task["status"] = "failed"
+                            task["status_label"] = "失败"
+                    record_audit(state, tenant_id=run.get("tenant_id", DEMO_TENANT_ID), actor_id=run.get("actor_id", DEMO_ACTOR_ID), action="run.failed", resource_type="run", resource_id=run_id, metadata={"task_id": task_id, "error": str(exc)[:200]})
+                    save_state(state)
 
     threading.Thread(target=worker, name=f"dsh-run-{run_id}", daemon=True).start()
 
@@ -311,7 +382,7 @@ class Handler(BaseHTTPRequestHandler):
         return bool(supplied) and hmac.compare_digest(supplied, expected)
 
     def paginated(self, items: list[dict]) -> list[dict] | dict | None:
-        query = parse_qs(urlparse(self.path).query)
+        query = getattr(self, "query", {})
         if "page_size" not in query and "page_token" not in query:
             return items
         try:
@@ -346,6 +417,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.request_id = self.headers.get("X-Request-ID", "").strip()[:120] or f"req_{uuid.uuid4().hex[:16]}"
         parsed = urlparse(self.path)
+        self.query = parse_qs(parsed.query)
         if parsed.path.startswith("/api/"):
             if not self.authorized(parsed.path):
                 return
@@ -369,13 +441,33 @@ class Handler(BaseHTTPRequestHandler):
             self.send_error_json("internal.error", str(exc), 500)
 
     def authorized(self, path: str) -> bool:
-        if not AUTH_TOKEN or path in {"/api/v1/health", "/api/v1/ready"}:
+        if not AUTH_TOKEN and not JWT_SECRET:
+            return True
+        if path in {"/api/v1/health", "/api/v1/ready"}:
             return True
         authorization = self.headers.get("Authorization", "")
         supplied = authorization[7:].strip() if authorization.startswith("Bearer ") else ""
-        if supplied and hmac.compare_digest(supplied, AUTH_TOKEN):
+        self.claims = {}
+        if supplied and AUTH_TOKEN and hmac.compare_digest(supplied, AUTH_TOKEN):
+            self.claims = {"sub": self.headers.get("X-Actor-ID", DEMO_ACTOR_ID), "tenant_id": self.headers.get("X-Tenant-ID", DEMO_TENANT_ID), "roles": ["owner"]}
             return True
+        if supplied and JWT_SECRET:
+            self.claims = verify_hs256(supplied, JWT_SECRET, issuer=OIDC_ISSUER) or {}
+            if self.claims:
+                return True
         self.send_error_json("auth.required", "authentication required", 401)
+        return False
+
+    def has_role(self, *allowed: str) -> bool:
+        if not (AUTH_TOKEN or JWT_SECRET):
+            return True
+        roles = roles_from_claims(getattr(self, "claims", {}) or {})
+        return bool(roles.intersection(allowed))
+
+    def require_role(self, *allowed: str) -> bool:
+        if self.has_role(*allowed):
+            return True
+        self.send_error_json("permission.denied", "insufficient role", 403, {"required_roles": list(allowed)})
         return False
 
     def static_get(self, path: str):
@@ -410,6 +502,13 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json({"status": "ready", "service": "dsh-workbench", "storage": {"type": STORAGE_MODE, "status": "available"}, "runtime": DSH_RUNTIME.metadata()})
             elif path == "/api/v1/runtime":
                 self.send_json(DSH_RUNTIME.metadata())
+            elif path == "/api/v1/queue":
+                counts = {}
+                for run in visible_runs:
+                    counts[run.get("status", "unknown")] = counts.get(run.get("status", "unknown"), 0) + 1
+                self.send_json({"max_concurrency": MAX_CONCURRENCY, "counts": counts, "active": counts.get("running", 0), "queued": counts.get("queued", 0)})
+            elif path == "/api/v1/org/members":
+                self.send_json([member for member in state.get("org_members", []) if member.get("tenant_id", tenant_id) == tenant_id])
             elif path == "/api/v1/dashboard":
                 approvals = [approval for approval in state["approvals"] if approval.get("task_id") in visible_task_ids]
                 artifacts = {task_id: items for task_id, items in state["artifacts"].items() if task_id in visible_task_ids}
@@ -435,6 +534,17 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json(run)
             elif path == "/api/v1/knowledge":
                 self.send_json(state["knowledge"])
+            elif path == "/api/v1/knowledge/sources":
+                source_views = []
+                for source in state["knowledge"]:
+                    chunks = [chunk for chunk in state.get("knowledge_chunks", []) if chunk.get("source_id") == source["id"]]
+                    source_views.append({**source, "chunks": len(chunks), "embedding": "local-hash-v1"})
+                self.send_json(source_views)
+            elif path == "/api/v1/knowledge/citations":
+                self.send_json([citation for citation in state.get("citations", []) if citation.get("tenant_id", tenant_id) == tenant_id])
+            elif path.startswith("/api/v1/scenario-packs/") and path.endswith("/evaluations"):
+                pack_id = path.split("/")[4]
+                self.send_json([item for item in state.get("pack_evaluations", []) if item.get("pack_id") == pack_id and item.get("tenant_id", tenant_id) == tenant_id])
             elif path == "/api/v1/workflows":
                 self.send_json(state["workflows"])
             elif path == "/api/v1/approvals":
@@ -469,6 +579,8 @@ class Handler(BaseHTTPRequestHandler):
             if self.replay_idempotency(state, path):
                 return
             if path == "/api/v1/tasks":
+                if not self.require_role("owner", "admin", "editor", "operator"):
+                    return
                 name = str(payload.get("name", "")).strip() or "未命名任务"
                 pack_id = str(payload.get("pack_id", "after-sales"))
                 skill_id = str(payload.get("skill_id", "equipment-diagnosis"))
@@ -483,21 +595,140 @@ class Handler(BaseHTTPRequestHandler):
                 self.remember_idempotency(state, path, task, 201)
                 save_state(state)
                 self.send_json(task, 201)
+            elif path in {"/api/v1/knowledge/sources", "/api/v1/knowledge/ingest"}:
+                if not self.require_role("owner", "admin", "editor"):
+                    return
+                source_id = str(payload.get("source_id", "")).strip() or f"source-{uuid.uuid4().hex[:8]}"
+                name = str(payload.get("name", source_id)).strip() or source_id
+                pack_id = str(payload.get("pack_id", "after-sales")).strip()
+                content = str(payload.get("content", "")).strip()
+                if not content:
+                    self.send_error_json("knowledge.content_required", "content is required for ingestion", 422)
+                    return
+                source = next((item for item in state["knowledge"] if item["id"] == source_id), None)
+                if source is None:
+                    source = {"id": source_id, "name": name, "pack_id": pack_id, "documents": 0, "status": "indexing", "updated": "刚刚"}
+                    state["knowledge"].append(source)
+                source.update({"name": name, "pack_id": pack_id, "status": "indexing", "updated": "刚刚"})
+                document_id = str(payload.get("document_id", "")).strip() or f"{source_id}:doc-{uuid.uuid4().hex[:8]}"
+                document = {"id": document_id, "source_id": source_id, "name": name, "pack_id": pack_id, "content": content[:200000], "metadata": payload.get("metadata", {}) if isinstance(payload.get("metadata", {}), dict) else {}}
+                state["knowledge_documents"] = [item for item in state.get("knowledge_documents", []) if item["id"] != document_id]
+                state["knowledge_documents"].append(document)
+                state["knowledge_chunks"] = [item for item in state.get("knowledge_chunks", []) if item.get("document_id") != document_id]
+                chunks = KNOWLEDGE_INDEX.ingest({**document, "id": document_id}, content)
+                state["knowledge_chunks"].extend(chunks)
+                source["documents"] = len([item for item in state["knowledge_documents"] if item.get("source_id") == source_id])
+                source["status"] = "ready"
+                record_audit(state, tenant_id=tenant_id, actor_id=actor_id, action="knowledge.ingested", resource_type="knowledge_source", resource_id=source_id, metadata={"document_id": document_id, "chunks": len(chunks), "embedding": "local-hash-v1"})
+                self.remember_idempotency(state, path, {"source": source, "document": {k: v for k, v in document.items() if k != "content"}, "chunks": len(chunks), "embedding": "local-hash-v1"}, 201)
+                save_state(state)
+                self.send_json({"source": source, "document": {k: v for k, v in document.items() if k != "content"}, "chunks": len(chunks), "embedding": "local-hash-v1"}, 201)
             elif path == "/api/v1/knowledge/search":
                 query = str(payload.get("query", "")).strip()
-                pack_id = str(payload.get("pack_id", "after-sales"))
-                matches = [
-                    {"type": "PDF", "title": "Cooling System Manual", "detail": "第 42 页 · 相关度 94%", "source_id": "product-manuals"},
-                    {"type": "TKT", "title": "历史工单 #8812", "detail": "E-204 · 相关度 88%", "source_id": "historical-tickets"},
-                ] if pack_id == "after-sales" else [
-                    {"type": "DOC", "title": "Repository Docs", "detail": "API compatibility · 相关度 91%", "source_id": "repository-docs"},
-                    {"type": "RUN", "title": "Service Runbooks", "detail": "升级路径 · 相关度 84%", "source_id": "runbooks"},
-                ]
-                self.send_json({"query": query, "pack_id": pack_id, "matches": matches}, 200)
+                if not query:
+                    self.send_error_json("knowledge.query_required", "query is required", 422)
+                    return
+                pack_id = str(payload.get("pack_id", "")).strip() or None
+                top_k = int(payload.get("top_k", 5))
+                hits = KNOWLEDGE_INDEX.search(state.get("knowledge_chunks", []), query, pack_id=pack_id, top_k=top_k)
+                source_map = {item["id"]: item for item in state["knowledge"]}
+                document_map = {item["id"]: item for item in state.get("knowledge_documents", [])}
+                matches = []
+                citations = []
+                for hit in hits:
+                    citation_id = f"cite-{uuid.uuid4().hex[:10]}"
+                    source = source_map.get(hit.get("source_id"), {})
+                    document = document_map.get(hit.get("document_id"), {})
+                    citation = {"id": citation_id, "tenant_id": tenant_id, "source_id": hit.get("source_id"), "document_id": hit.get("document_id"), "chunk_id": hit.get("id"), "score": hit.get("score", 0), "created_at": now_iso()}
+                    citations.append(citation)
+                    matches.append({"type": document.get("metadata", {}).get("type", "DOC"), "title": document.get("name", source.get("name", hit.get("source_id"))), "detail": f"片段 {hit.get('chunk_index', 0) + 1} · 相关度 {round(hit.get('score', 0) * 100)}%", "source_id": hit.get("source_id"), "document_id": hit.get("document_id"), "chunk_id": hit.get("id"), "citation_id": citation_id, "snippet": hit.get("text", "")[:320]})
+                state.setdefault("citations", []).extend(citations)
+                if citations:
+                    save_state(state)
+                self.send_json({"query": query, "pack_id": pack_id, "matches": matches, "citations": citations, "embedding": "local-hash-v1"}, 200)
             elif path == "/api/v1/chat/messages":
                 message = str(payload.get("message", "")).strip()
                 pack = pack_for(str(payload.get("pack_id", "after-sales")))
                 self.send_json({"reply": f"已收到你的问题。我会在“{pack['name']}”范围内检索证据，并可以继续创建 Task。", "evidence_count": 2, "pack_id": pack["id"]}, 201)
+            elif path.startswith("/api/v1/scenario-packs/") and path.endswith("/evaluations"):
+                if not self.require_role("owner", "admin", "editor"):
+                    return
+                pack_id = path.split("/")[4]
+                pack_path = ROOT / "packs" / pack_id / "pack.yaml"
+                if not pack_path.exists():
+                    self.send_error_json("pack.not_found", "scenario pack manifest not found", 404)
+                    return
+                result = evaluate_pack_manifest(pack_path)
+                result.update({"id": f"eval-{uuid.uuid4().hex[:10]}", "tenant_id": tenant_id, "created_by": actor_id, "created_at": now_iso()})
+                state.setdefault("pack_evaluations", []).insert(0, result)
+                record_audit(state, tenant_id=tenant_id, actor_id=actor_id, action="scenario_pack.evaluated", resource_type="scenario_pack", resource_id=pack_id, metadata={"score": result.get("score")})
+                self.remember_idempotency(state, path, result, 201)
+                save_state(state)
+                self.send_json(result, 201)
+            elif path == "/api/v1/org/members":
+                if not self.require_role("owner", "admin"):
+                    return
+                email = str(payload.get("email", "")).strip().lower()
+                role = str(payload.get("role", "viewer")).strip().lower()
+                if not email or role not in {"owner", "admin", "editor", "operator", "viewer"}:
+                    self.send_error_json("member.invalid", "email and a valid role are required", 422)
+                    return
+                member = {"id": f"member-{uuid.uuid4().hex[:8]}", "email": email, "role": role, "status": "invited", "tenant_id": tenant_id, "created_at": now_iso()}
+                state.setdefault("org_members", []).insert(0, member)
+                record_audit(state, tenant_id=tenant_id, actor_id=actor_id, action="org.member_invited", resource_type="member", resource_id=member["id"], metadata={"role": role})
+                self.remember_idempotency(state, path, member, 201)
+                save_state(state)
+                self.send_json(member, 201)
+            elif path.startswith("/api/v1/runs/") and path.endswith("/cancel"):
+                if not self.require_role("owner", "admin", "editor", "operator"):
+                    return
+                run_id = path.split("/")[4]
+                run = next((item for item in state["runs"] if item["id"] == run_id and item.get("tenant_id", DEMO_TENANT_ID) == tenant_id), None)
+                if not run:
+                    self.send_error_json("run.not_found", "run not found", 404)
+                    return
+                if run.get("status") in {"completed", "failed", "cancelled", "rejected"}:
+                    self.send_error_json("run.not_cancellable", "run is already finished", 409)
+                    return
+                run["cancel_requested"] = True
+                run["status"] = "cancelled"
+                run["message"] = "运行已取消"
+                run["finished_at"] = now_iso()
+                task = next((item for item in state["tasks"] if item["id"] == run.get("task_id")), None)
+                if task:
+                    task["status"] = "cancelled"
+                    task["status_label"] = "已取消"
+                record_audit(state, tenant_id=tenant_id, actor_id=actor_id, action="run.cancel_requested", resource_type="run", resource_id=run_id, metadata={"task_id": run.get("task_id")})
+                save_state(state)
+                self.send_json(run)
+            elif path.startswith("/api/v1/runs/") and path.endswith("/retry"):
+                if not self.require_role("owner", "admin", "editor", "operator"):
+                    return
+                run_id = path.split("/")[4]
+                run = next((item for item in state["runs"] if item["id"] == run_id and item.get("tenant_id", DEMO_TENANT_ID) == tenant_id), None)
+                if not run:
+                    self.send_error_json("run.not_found", "run not found", 404)
+                    return
+                if run.get("status") not in {"failed", "cancelled", "rejected"}:
+                    self.send_error_json("run.not_retryable", "only failed or cancelled runs can be retried", 409)
+                    return
+                if int(run.get("attempt", 1)) >= int(run.get("max_attempts", 3)):
+                    self.send_error_json("run.retry_limit", "run retry limit reached", 409)
+                    return
+                run["attempt"] = int(run.get("attempt", 1)) + 1
+                run["status"] = "queued"
+                run["cancel_requested"] = False
+                run["message"] = "已重新加入运行队列"
+                run.pop("finished_at", None)
+                task_id = run.get("task_id")
+                task = next((item for item in state["tasks"] if item["id"] == task_id), None)
+                if task:
+                    task["status"] = "queued"
+                    task["status_label"] = "待运行"
+                record_audit(state, tenant_id=tenant_id, actor_id=actor_id, action="run.retried", resource_type="run", resource_id=run_id, metadata={"attempt": run["attempt"], "task_id": task_id})
+                save_state(state)
+                schedule_local_run(run_id, task_id=task_id, workflow_id=run.get("workflow_id"))
+                self.send_json(run)
             elif path.startswith("/api/v1/runs/") and path.endswith("/callback"):
                 if not self.verify_callback_signature():
                     self.send_error_json("callback.invalid_signature", "invalid callback signature", 401)
@@ -534,12 +765,14 @@ class Handler(BaseHTTPRequestHandler):
                 save_state(state)
                 self.send_json(run)
             elif path.startswith("/api/v1/workflows/") and path.endswith("/runs"):
+                if not self.require_role("owner", "admin", "editor", "operator"):
+                    return
                 workflow_id = path.split("/")[4]
                 workflow = next((item for item in state["workflows"] if item["id"] == workflow_id), None)
                 if not workflow:
                     self.send_error_json("workflow.not_found", "workflow not found", 404)
                     return
-                run = {"id": f"run-{uuid.uuid4().hex[:8]}", "workflow_id": workflow_id, "tenant_id": tenant_id, "actor_id": actor_id, "runtime": DSH_RUNTIME.metadata(), "status": "queued", "message": "Workflow 已加入运行队列", "created_at": now_iso()}
+                run = {"id": f"run-{uuid.uuid4().hex[:8]}", "workflow_id": workflow_id, "tenant_id": tenant_id, "actor_id": actor_id, "runtime": DSH_RUNTIME.metadata(), "status": "queued", "message": "Workflow 已加入运行队列", "attempt": 1, "max_attempts": 3, "cancel_requested": False, "created_at": now_iso()}
                 state["runs"].insert(0, run)
                 record_audit(state, tenant_id=tenant_id, actor_id=actor_id, action="workflow.run_queued", resource_type="run", resource_id=run["id"], metadata={"workflow_id": workflow_id})
                 self.remember_idempotency(state, path, run, 201)
@@ -547,8 +780,10 @@ class Handler(BaseHTTPRequestHandler):
                 schedule_local_run(run["id"], workflow_id=workflow_id)
                 self.send_json(run, 201)
             elif path == "/api/v1/skill-runs":
+                if not self.require_role("owner", "admin", "editor", "operator"):
+                    return
                 skill_id = str(payload.get("skill_id", "equipment-diagnosis"))
-                run = {"id": f"run-{uuid.uuid4().hex[:8]}", "task_id": None, "skill_id": skill_id, "tenant_id": tenant_id, "actor_id": actor_id, "runtime": DSH_RUNTIME.metadata(), "status": "queued", "duration": "", "message": "已加入运行队列", "created_at": now_iso(), "input": payload.get("input", "")}
+                run = {"id": f"run-{uuid.uuid4().hex[:8]}", "task_id": None, "skill_id": skill_id, "tenant_id": tenant_id, "actor_id": actor_id, "runtime": DSH_RUNTIME.metadata(), "status": "queued", "duration": "", "message": "已加入运行队列", "attempt": 1, "max_attempts": 3, "cancel_requested": False, "created_at": now_iso(), "input": payload.get("input", "")}
                 state["runs"].insert(0, run)
                 record_audit(state, tenant_id=tenant_id, actor_id=actor_id, action="skill.run_queued", resource_type="run", resource_id=run["id"], metadata={"skill_id": skill_id})
                 self.remember_idempotency(state, path, run, 201)
@@ -556,6 +791,8 @@ class Handler(BaseHTTPRequestHandler):
                 schedule_local_run(run["id"])
                 self.send_json(run, 201)
             elif path.startswith("/api/v1/tasks/") and path.endswith("/runs"):
+                if not self.require_role("owner", "admin", "editor", "operator"):
+                    return
                 task_id = path.split("/")[4]
                 task = next((t for t in state["tasks"] if t["id"] == task_id), None)
                 if not task:
@@ -565,7 +802,7 @@ class Handler(BaseHTTPRequestHandler):
                     self.send_error_json("task.forbidden", "task belongs to another tenant", 403)
                     return
                 approval_required = task.get("status") == "approval"
-                run = {"id": f"run-{uuid.uuid4().hex[:8]}", "task_id": task_id, "skill_id": task["skill_id"], "tenant_id": tenant_id, "actor_id": actor_id, "status": "queued", "duration": "", "message": "已加入运行队列", "created_at": now_iso()}
+                run = {"id": f"run-{uuid.uuid4().hex[:8]}", "task_id": task_id, "skill_id": task["skill_id"], "tenant_id": tenant_id, "actor_id": actor_id, "status": "queued", "duration": "", "message": "已加入运行队列", "attempt": 1, "max_attempts": 3, "cancel_requested": False, "created_at": now_iso()}
                 knowledge_scope = [item["id"] for item in state["knowledge"] if item.get("pack_id") == task["pack_id"]]
                 skill = skill_for(task["skill_id"])
                 request = DSH_RUNTIME.build_request(

@@ -16,6 +16,7 @@ class RunStatus(str, Enum):
     WAITING_APPROVAL = "waiting_approval"
     FAILED = "failed"
     REJECTED = "rejected"
+    CANCELLED = "cancelled"
 
     @classmethod
     def parse(cls, value: str) -> "RunStatus":
@@ -25,7 +26,7 @@ class RunStatus(str, Enum):
             raise ModelError(f"unknown run status: {value!r}") from exc
 
 
-TERMINAL_RUN_STATUSES = frozenset({RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.REJECTED})
+TERMINAL_RUN_STATUSES = frozenset({RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.REJECTED, RunStatus.CANCELLED})
 T = TypeVar("T", bound="Resource")
 
 

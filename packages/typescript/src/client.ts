@@ -1,5 +1,5 @@
 import { errorForStatus, ErrorEnvelope } from './errors.js';
-import { Artifact, ChatResponse, isTerminalRun, KnowledgeSearchResponse, Page, Run, Task } from './resources.js';
+import { Artifact, ChatResponse, isTerminalRun, KnowledgeSearchResponse, KnowledgeSource, Page, Run, Task } from './resources.js';
 
 export interface DSHClientOptions {
   baseUrl: string;
@@ -95,6 +95,9 @@ class RunsResource {
   get(runId: string): Promise<Run> { return this.client.request<Run>('GET', `/api/v1/runs/${encodeURIComponent(runId)}`); }
   async list(options: { pageSize?: number; pageToken?: string } = {}): Promise<Run[]> { return (await this.listPage(options)).items; }
   async listPage(options: { pageSize?: number; pageToken?: string } = {}): Promise<Page<Run>> { const query = new URLSearchParams(); if (options.pageSize !== undefined) query.set('page_size', String(options.pageSize)); if (options.pageToken) query.set('page_token', options.pageToken); const payload = await this.client.request<Run[] | { items: Run[]; next_page_token?: string | null }>('GET', `/api/v1/runs${query.toString() ? `?${query}` : ''}`); return Array.isArray(payload) ? { items: payload, nextPageToken: null } : { items: payload.items, nextPageToken: payload.next_page_token ?? null }; }
+  cancel(runId: string): Promise<Run> { return this.client.request<Run>('POST', `/api/v1/runs/${encodeURIComponent(runId)}/cancel`, {}); }
+  retry(runId: string): Promise<Run> { return this.client.request<Run>('POST', `/api/v1/runs/${encodeURIComponent(runId)}/retry`, {}); }
+  queue(): Promise<Record<string, unknown>> { return this.client.request<Record<string, unknown>>('GET', '/api/v1/queue'); }
   wait(runId: string, options?: { timeoutMs?: number; pollIntervalMs?: number }): Promise<Run> { return this.client.wait(runId, options); }
 }
 
@@ -105,6 +108,9 @@ class ChatResource {
 
 class KnowledgeResource {
   constructor(private readonly client: DSHClient) {}
+  listSources(): Promise<KnowledgeSource[]> { return this.client.request<KnowledgeSource[]>('GET', '/api/v1/knowledge/sources'); }
+  ingest(input: { name: string; content: string; packId?: string; sourceId?: string; documentId?: string; metadata?: Record<string, unknown>; idempotencyKey?: string }): Promise<Record<string, unknown>> { return this.client.request('POST', '/api/v1/knowledge/ingest', { name: input.name, content: input.content, pack_id: input.packId ?? 'after-sales', ...(input.sourceId ? { source_id: input.sourceId } : {}), ...(input.documentId ? { document_id: input.documentId } : {}), ...(input.metadata ? { metadata: input.metadata } : {}) }, input.idempotencyKey); }
+  citations(): Promise<Array<Record<string, unknown>>> { return this.client.request('GET', '/api/v1/knowledge/citations'); }
   search(query: string, packId = 'after-sales', topK?: number): Promise<KnowledgeSearchResponse> { return this.client.request<KnowledgeSearchResponse>('POST', '/api/v1/knowledge/search', { query, pack_id: packId, ...(topK === undefined ? {} : { top_k: topK }) }); }
 }
 

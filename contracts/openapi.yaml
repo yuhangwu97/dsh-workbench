@@ -206,6 +206,30 @@ paths:
           content: {application/json: {schema: {$ref: '#/components/schemas/Run'}}}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '422': {$ref: '#/components/responses/Validation'}
+  /api/v1/queue:
+    get:
+      tags: [Runs]
+      operationId: getQueueStatus
+      responses:
+        '200':
+          description: Queue and concurrency status
+          content: {application/json: {schema: {type: object}}}
+  /api/v1/runs/{run_id}/cancel:
+    post:
+      tags: [Runs]
+      operationId: cancelRun
+      parameters: [{$ref: '#/components/parameters/RunId'}]
+      responses:
+        '200': {description: Cancel request accepted, content: {application/json: {schema: {$ref: '#/components/schemas/Run'}}}}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/v1/runs/{run_id}/retry:
+    post:
+      tags: [Runs]
+      operationId: retryRun
+      parameters: [{$ref: '#/components/parameters/RunId'}]
+      responses:
+        '200': {description: Run requeued, content: {application/json: {schema: {$ref: '#/components/schemas/Run'}}}}
+        '409': {$ref: '#/components/responses/Conflict'}
   /api/v1/knowledge:
     get:
       tags: [Knowledge]
@@ -214,6 +238,48 @@ paths:
         '200':
           description: Knowledge source metadata
           content: {application/json: {schema: {type: array, items: {type: object}}}}
+  /api/v1/knowledge/sources:
+    get:
+      tags: [Knowledge]
+      operationId: listKnowledgeSourcesDetailed
+      responses:
+        '200': {description: Sources and indexed chunk counts, content: {application/json: {schema: {type: array, items: {type: object}}}}}
+    post:
+      tags: [Knowledge]
+      operationId: ingestKnowledgeSource
+      parameters: [{$ref: '#/components/parameters/Idempotency-Key'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, content]
+              properties:
+                source_id: {type: string}
+                document_id: {type: string}
+                name: {type: string}
+                pack_id: {type: string}
+                content: {type: string}
+                metadata: {type: object}
+      responses:
+        '201': {description: Indexed document and chunks, content: {application/json: {schema: {type: object}}}}
+  /api/v1/knowledge/ingest:
+    post:
+      tags: [Knowledge]
+      operationId: ingestKnowledgeDocument
+      parameters: [{$ref: '#/components/parameters/Idempotency-Key'}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {type: object, required: [name, content]}}}
+      responses:
+        '201': {description: Indexed document, content: {application/json: {schema: {type: object}}}}
+  /api/v1/knowledge/citations:
+    get:
+      tags: [Knowledge]
+      operationId: listKnowledgeCitations
+      responses:
+        '200': {description: Citation records, content: {application/json: {schema: {type: array, items: {type: object}}}}}
   /api/v1/knowledge/search:
     post:
       tags: [Knowledge]
@@ -252,6 +318,33 @@ paths:
         '201':
           description: Chat response
           content: {application/json: {schema: {type: object}}}
+  /api/v1/org/members:
+    get:
+      tags: [Organization]
+      operationId: listOrganizationMembers
+      responses:
+        '200': {description: Organization members, content: {application/json: {schema: {type: array, items: {type: object}}}}}
+    post:
+      tags: [Organization]
+      operationId: inviteOrganizationMember
+      requestBody:
+        required: true
+        content: {application/json: {schema: {type: object, required: [email], properties: {email: {type: string, format: email}, role: {type: string}}}}}
+      responses:
+        '201': {description: Invited member, content: {application/json: {schema: {type: object}}}}
+  /api/v1/scenario-packs/{pack_id}/evaluations:
+    get:
+      tags: [Scenario Packs]
+      operationId: listScenarioPackEvaluations
+      parameters: [{name: pack_id, in: path, required: true, schema: {type: string}}]
+      responses:
+        '200': {description: Evaluation history, content: {application/json: {schema: {type: array, items: {type: object}}}}}
+    post:
+      tags: [Scenario Packs]
+      operationId: evaluateScenarioPack
+      parameters: [{name: pack_id, in: path, required: true, schema: {type: string}}]
+      responses:
+        '201': {description: Evaluation result, content: {application/json: {schema: {type: object}}}}
   /api/v1/workflows:
     get:
       tags: [Runs]

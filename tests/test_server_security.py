@@ -69,3 +69,18 @@ def test_callback_accepts_hmac_signature(tmp_path):
     finally:
         proc.terminate()
         proc.wait(timeout=3)
+
+
+def test_tenant_scope_hides_tasks_from_other_tenants(tmp_path):
+    proc, base = _start(tmp_path, port=8777)
+    try:
+        body = json.dumps({"name": "Tenant A", "pack_id": "after-sales", "skill_id": "equipment-diagnosis"}).encode()
+        create = urllib.request.Request(base + "/api/v1/tasks", data=body, method="POST", headers={"Content-Type": "application/json", "X-Tenant-ID": "tenant-a"})
+        with urllib.request.urlopen(create) as response:
+            task_id = json.load(response)["id"]
+        hidden = urllib.request.Request(base + "/api/v1/tasks", headers={"X-Tenant-ID": "tenant-b"})
+        with urllib.request.urlopen(hidden) as response:
+            assert all(task["id"] != task_id for task in json.load(response))
+    finally:
+        proc.terminate()
+        proc.wait(timeout=3)

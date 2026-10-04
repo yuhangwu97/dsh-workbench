@@ -1,22 +1,23 @@
 # DSH Workbench
 
+<div align="center">
+
 [![CI](https://github.com/yuhangwu97/dsh-workbench/actions/workflows/ci.yml/badge.svg)](https://github.com/yuhangwu97/dsh-workbench/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![API](https://img.shields.io/badge/API-v1-1f6feb.svg)](contracts/openapi.yaml)
 
-> **把一句业务问题，变成一条有证据、有状态、可交付的工作链。**
->
-> DSH Workbench 是一个开源的 AI Task Platform：用 Chat 接收问题，用 Task 管理工作，用 Knowledge 和 Workflow 组织执行，用 Approval 守住业务动作，最后把结果沉淀为 Artifact。
+<img src="docs/assets/hero.svg" alt="DSH Workbench product overview" width="100%">
 
-> **Turn a business question into work your team can inspect and ship.**
->
-> DSH Workbench is an open-source AI Task Platform for teams that need more than a chat window. Chat captures the request, Tasks carry the work, Knowledge and Workflows guide execution, Approvals protect business actions, and Artifacts preserve the result.
+**企业 AI 任务平台 · Open-source AI Task Platform**<br>
+把一句业务问题，变成一条有证据、有状态、可交付的工作链。
+
+[打开仓库](https://github.com/yuhangwu97/dsh-workbench) · [运行本地 Demo](#五分钟看到产品--see-the-product-in-five-minutes) · [查看 API](contracts/openapi.yaml) · [开始扩展](docs/extensions.md)
+
+</div>
 
 ![DSH Workbench overview](docs/assets/overview.png)
 
 <p align="center"><sub>Reference workspace · Overview / 概览</sub></p>
-
-[打开仓库](https://github.com/yuhangwu97/dsh-workbench) · [运行本地 Demo](#五分钟看到产品--see-the-product-in-five-minutes) · [查看 API](contracts/openapi.yaml) · [开始扩展](docs/extensions.md)
 
 ## 这是什么 | The product
 

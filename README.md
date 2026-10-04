@@ -4,56 +4,87 @@
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![API](https://img.shields.io/badge/API-v1-1f6feb.svg)](contracts/openapi.yaml)
 
-> **把业务问题变成可执行任务，把证据、过程和结果留在同一条链路里。**
+> **把一句业务问题，变成一条有证据、有状态、可交付的工作链。**
 >
-> DSH Workbench 是一个面向企业的开源 AI Task Platform。它提供统一的 Task、Knowledge、Workflow、Skill、Approval 和 Artifact 模型，并把复杂推理交给受限的 DSH Runtime。
+> DSH Workbench 是一个开源的 AI Task Platform：用 Chat 接收问题，用 Task 管理工作，用 Knowledge 和 Workflow 组织执行，用 Approval 守住业务动作，最后把结果沉淀为 Artifact。
 
-> **Turn business requests into accountable work.**
+> **Turn a business question into work your team can inspect and ship.**
 >
-> DSH Workbench is an open-source AI Task Platform for teams that need more than a chat window. It gives applications a shared model for Tasks, Knowledge, Workflows, Skills, Approvals, and Artifacts, while DSH handles constrained reasoning and tool orchestration.
+> DSH Workbench is an open-source AI Task Platform for teams that need more than a chat window. Chat captures the request, Tasks carry the work, Knowledge and Workflows guide execution, Approvals protect business actions, and Artifacts preserve the result.
 
-[GitHub repository](https://github.com/yuhangwu97/dsh-workbench) · [OpenAPI contract](contracts/openapi.yaml) · [Extension guide](docs/extensions.md) · [Release guide](docs/releasing.md)
+![DSH Workbench overview](docs/assets/overview.png)
 
-## 产品定位 | Product position
+<p align="center"><sub>Reference workspace · Overview / 概览</sub></p>
 
-Chat 适合开始一个问题，但企业真正需要的是一条可追踪的工作链：谁提交了什么、使用了哪些证据、经过了哪些步骤、调用了哪些工具、是否需要审批、最后产生了什么结果。
+[打开仓库](https://github.com/yuhangwu97/dsh-workbench) · [运行本地 Demo](#五分钟看到产品--see-the-product-in-five-minutes) · [查看 API](contracts/openapi.yaml) · [开始扩展](docs/extensions.md)
 
-Workbench 把这条链路做成公共产品层。它不把模型、向量库或工作流引擎写死在核心里，团队可以从本地 Demo 开始，再替换成自己的 DSH、检索服务、队列和对象存储。
+## 这是什么 | The product
 
-Chat is a useful entry point, but enterprise work needs an accountable chain: what was submitted, which evidence was used, which steps ran, which tools were called, whether a human approved the action, and what result was produced.
+企业里的 AI 工作很少停在“回答一句话”。它通常要继续检索资料、调用工具、走审批、留下引用，并交付一份可以复查的结果。Workbench 把这些动作放在同一个工作区里，让每个请求都有明确的输入、过程、责任人和产物。
 
-Workbench owns that product layer. It keeps the model provider, vector database, workflow engine, queue, and object storage behind replaceable interfaces, so a team can start locally and grow into its own production topology.
+AI work in a company rarely ends with one answer. It usually needs source material, tools, approval, citations, and a result someone else can review. Workbench keeps that chain in one workspace, with a durable input, run history, ownership, and output for every request.
 
-## 这套产品解决什么问题 | What it gives a team
+### 产品里有什么 | What is in the workspace
 
-| 产品表面 | 用户得到什么 | Product surface | What users get |
+| 产品入口 | 你可以做什么 | Product surface | What it is for |
 | --- | --- | --- | --- |
-| **Chat Intake** | 从一句问题开始，自动关联场景包和相关证据 | **Chat Intake** | Start with a question and attach the right scenario and evidence |
-| **Task Inbox** | 每个业务请求都有状态、负责人、输入快照和执行记录 | **Task Inbox** | Every request has state, ownership, input, and execution history |
-| **Knowledge** | 知识源有范围、有来源、有引用，不把答案和证据混在一起 | **Knowledge** | Sources are scoped and cited instead of being hidden behind an answer |
-| **Workflow** | 把检索、Skill、审批和产物组成可复用的过程 | **Workflow** | Compose retrieval, Skills, approvals, and outputs into reusable processes |
-| **Run / Approval** | 可以看到运行轨迹，高风险动作先停下来等人确认 | **Run / Approval** | Inspect execution and pause risky actions for human approval |
-| **Artifact Library** | 报告、证据包、计划和结构化结果可以长期留存 | **Artifact Library** | Keep reports, evidence bundles, plans, and structured results |
+| **Chat** | 从自然语言问题开始，随时转成 Task | **Chat** | Start from a question and turn it into a Task |
+| **Tasks** | 看状态、负责人、输入快照和下一步 | **Tasks** | Track state, ownership, input, and next action |
+| **Knowledge** | 管理有范围、有来源、可引用的资料 | **Knowledge** | Keep scoped, sourced, citable knowledge |
+| **Workflow** | 把检索、Skill、审批和产物串成过程 | **Workflow** | Compose retrieval, Skills, approvals, and outputs |
+| **Runs** | 看到每一步执行和工具调用 | **Runs** | Inspect each execution step and tool call |
+| **Approvals** | 在真实业务写入前让人确认 | **Approvals** | Confirm high-impact actions before they write |
+| **Artifacts** | 留下报告、证据包、计划和结构化结果 | **Artifacts** | Preserve reports, evidence bundles, plans, and structured results |
 
-## 三个第一方场景包 | First-party Scenario Packs
+## 三个可以直接开始的场景 | Three scenario packs
 
-| 场景包 | 入口问题 | 主要产物 |
+Workbench 的第一版不是一个空白的聊天框，而是三个带有业务入口的 Scenario Pack。每个 Pack 都可以声明自己的 Skills、Knowledge Sources、Workflow、权限和审批规则。
+
+The first release starts with three concrete Scenario Packs. Each pack can declare its Skills, Knowledge Sources, Workflows, permissions, and approval rules in one versioned manifest.
+
+| 场景 | 从哪里开始 | 最后得到什么 |
 | --- | --- | --- |
 | **售后诊断** | 设备日志、故障码、历史工单 | 诊断报告、维修建议、证据包 |
 | **研发助手** | Issue、代码上下文、复现信息 | 调查记录、影响范围、Patch Plan |
 | **运营告警** | 告警事件、Runbook、影响范围 | 告警摘要、升级建议、审批动作 |
 
-| Pack | Typical input | Typical output |
+| Pack | Start with | Finish with |
 | --- | --- | --- |
 | **After-sales Diagnosis** | Device logs, fault codes, historical tickets | Diagnosis report, repair advice, evidence bundle |
 | **Engineering Assistant** | Issues, code context, reproduction data | Investigation record, impact analysis, patch plan |
 | **Operations Alerts** | Alert events, runbooks, impact scope | Alert summary, escalation advice, approved action |
 
-Scenario Pack 是产品的业务扩展单元。它可以同时声明 Skills、Knowledge Sources、Workflows、权限策略和审批规则，见 [`packs/after-sales/pack.yaml`](packs/after-sales/pack.yaml)。
+## 产品界面 | Product tour
 
-A Scenario Pack is the unit of business extension. It declares Skills, Knowledge Sources, Workflows, access policy, and approval rules in one versioned manifest.
+真实的工作链会在三个地方展开：Chat 负责收集上下文，Scenario Pack 负责给出业务边界，Artifact Library 负责让结果可以被复查和复用。
 
-## 产品工作流 | Product workflow
+The product has three visible moments: Chat captures context, Scenario Packs set the business boundary, and the Artifact Library keeps the outcome reviewable and reusable.
+
+<details open>
+<summary><strong>01 · Chat + evidence / 对话与证据</strong></summary>
+
+![Chat intake with evidence](docs/assets/chat.png)
+
+<p align="center"><sub>问题、场景包和证据源在同一个上下文里。</sub></p>
+</details>
+
+<details open>
+<summary><strong>02 · Scenario Packs / 场景包</strong></summary>
+
+![Scenario Pack library](docs/assets/packs.png)
+
+<p align="center"><sub>每个场景包都把 Skills、Workflows 和 Knowledge 组合成一个可使用的入口。</sub></p>
+</details>
+
+<details open>
+<summary><strong>03 · Artifacts / 结果产物</strong></summary>
+
+![Artifact library](docs/assets/artifacts.png)
+
+<p align="center"><sub>报告、证据包和 Patch Plan 会跟着 Task 长期留存。</sub></p>
+</details>
+
+## 一条完整的工作链 | One accountable run
 
 ```mermaid
 flowchart LR
@@ -73,21 +104,45 @@ flowchart LR
     J --> L[Audit]
 ```
 
-产品层负责 Task、租户、权限、审批、Artifact 和审计；DSH Runtime 负责受限推理、工具编排和结构化输出。这个边界让运行时可以更换，而业务数据和产品语义不会跟着迁移。
+产品层负责 Task、租户、权限、审批、Artifact 和审计；DSH Runtime 负责受限推理、工具编排和结构化输出。你可以替换运行时、检索服务、队列或对象存储，而不必重写产品语义。
 
-The product layer owns Tasks, tenants, permissions, approvals, Artifacts, and audit. DSH Runtime owns constrained reasoning, tool orchestration, and structured output. The runtime can change without changing the business model.
+The product layer owns Tasks, tenants, permissions, approvals, Artifacts, and audit. DSH Runtime owns constrained reasoning, tool orchestration, and structured output. Replace the runtime, search service, queue, or object store without rewriting the product model.
 
-## 开发者入口 | Developer surfaces
+## 给团队的价值 | Why teams use it
 
-### 1. HTTP API
+- **从聊天到工作**：对话不会停在消息列表里，而是可以转成有状态的 Task。
+- **证据跟着结果走**：知识来源、引用和 Artifact 保持在同一条链路中。
+- **业务动作有人把关**：写工单、升级告警、修改配置等动作可以先停在 Approval。
+- **运行时可以替换**：核心产品模型不绑定某个模型、向量库或工作流引擎。
 
-公共 API 使用 `/api/v1`，契约在 [`contracts/openapi.yaml`](contracts/openapi.yaml)。API 提供统一错误码、`X-Request-ID`、`Idempotency-Key`、分页、租户上下文和 DSH Callback 签名校验。
+- **From chat to work**: a conversation can become a stateful Task.
+- **Evidence travels with the result**: sources, citations, and Artifacts stay linked.
+- **Human control at the boundary**: write operations can pause for Approval.
+- **Replaceable runtime**: the product model stays independent of a model, vector store, or workflow engine.
 
-The versioned API lives under `/api/v1`. The OpenAPI file is the compatibility source for clients, errors, request tracing, idempotency, pagination, tenant context, and signed DSH callbacks.
+## 五分钟看到产品 | See the product in five minutes
 
-### 2. Python SDK
+```bash
+git clone https://github.com/yuhangwu97/dsh-workbench.git
+cd dsh-workbench
+python3 server.py --port 8766
+```
 
-包名：`dsh-workbench`，导入名：`dsh_workbench`。同时提供同步和异步 Client。
+打开 <http://127.0.0.1:8766/>，你会看到 Overview、Chat、Tasks、Knowledge、Workflow、Approvals 和 Artifacts。默认的 `local-demo` runtime 使用本地 JSON 状态，适合体验完整链路。
+
+Open <http://127.0.0.1:8766/> to explore Overview, Chat, Tasks, Knowledge, Workflow, Approvals, and Artifacts. The default `local-demo` runtime uses local JSON state for a fast end-to-end walkthrough.
+
+如果你希望用 Docker 启动：
+
+```bash
+cp .env.example .env
+# 设置 WORKBENCH_AUTH_TOKEN；真实 DSH 可填写 DSH_ENDPOINT
+docker compose up -d --build
+```
+
+## 给开发者的扩展面 | Build on the platform
+
+### Python SDK
 
 ```python
 from dsh_workbench import DSHClient
@@ -110,9 +165,7 @@ completed = client.runs.wait(run.id)
 artifacts = client.artifacts.list(task_id=task.id)
 ```
 
-### 3. TypeScript SDK
-
-包名：`@dsh-workbench/sdk`，基于原生 Fetch，不绑定 React、Vue 或 Node 框架。
+### TypeScript SDK
 
 ```ts
 import { DSHClient } from '@dsh-workbench/sdk';
@@ -131,115 +184,34 @@ const task = await client.tasks.create({
   input: { device_id: '3021', fault_code: 'E-204' },
 });
 const run = await client.tasks.run(task.id);
-const completed = await client.runs.wait(run.id);
+await client.runs.wait(run.id);
 ```
 
-两套 SDK 共享 OpenAPI 和 JSON Schema，资源字段、状态机和错误模型保持一致。
+Python 和 TypeScript SDK 共享 OpenAPI 与 JSON Schema，资源字段、状态机和错误模型保持一致。Provider 接口可以接入知识库、业务工具、工作流执行器、对象存储和事件管道，详见 [`docs/extensions.md`](docs/extensions.md)。
 
-Both SDKs share the same OpenAPI and JSON Schema contracts, so resource fields, state transitions, and errors stay aligned across languages.
-
-### 4. 扩展协议 | Extension protocols
-
-不改核心服务，也可以替换基础设施：
-
-- `KnowledgeProvider`：接入 pgvector、Elasticsearch、Milvus 或内部搜索
-- `SkillProvider`：接入企业内部工具和业务动作
-- `WorkflowExecutor`：接入 DSH、Temporal、LangGraph 或自研执行器
-- `ArtifactStore`：接入 S3、OSS、MinIO 或本地对象存储
-- `ApprovalPolicy`：按租户、资源和动作定义审批规则
-- `EventSink`：接入 Kafka、Webhook、审计和指标管道
-
-The extension surface lets teams replace infrastructure without forking the domain model. See [`docs/extensions.md`](docs/extensions.md) for the provider contracts and safety boundary.
-
-## 五分钟启动 | Five-minute start
-
-### 本地参考服务 | Local reference service
-
-```bash
-git clone https://github.com/yuhangwu97/dsh-workbench.git
-cd dsh-workbench
-python3 server.py --port 8766
-```
-
-打开 <http://127.0.0.1:8766/>。默认使用 `local-demo` runtime 和 JSON 状态文件，适合快速体验产品链路。
-
-Open <http://127.0.0.1:8766/>. The default `local-demo` runtime and JSON state are intended for a fast product walkthrough.
-
-### Docker Compose
-
-```bash
-cp .env.example .env
-# 设置 WORKBENCH_AUTH_TOKEN；真实 DSH 可填写 DSH_ENDPOINT
-docker compose up -d --build
-```
-
-Compose 默认使用 SQLite 持久化并暴露 `/api/v1/health` 和 `/api/v1/ready` 探针。
-
-Compose uses SQLite persistence by default and exposes `/api/v1/health` and `/api/v1/ready` probes.
-
-### 从仓库安装 SDK | Install SDKs from the repository
-
-```bash
-python -m pip install -e packages/python
-npm install ./packages/typescript
-```
-
-本仓库已经准备好构建 wheel 和 npm tarball；PyPI/npm 正式发布步骤见 [`docs/releasing.md`](docs/releasing.md)。
-
-The repository is ready to build a Python wheel and an npm tarball. See [`docs/releasing.md`](docs/releasing.md) for publishing steps.
-
-## 安全和生产边界 | Security and production boundary
-
-当前参考服务已经支持：
-
-- Bearer Token 保护 API
-- `tenant_id` / `actor_id` 上下文
-- 基础租户隔离
-- Task / Run / Artifact 审计记录
-- 高风险动作的 Approval 状态
-- DSH Callback HMAC 签名校验
-- 受限工具白名单、禁止 shell 和受限文件系统策略
-
-生产部署还需要按团队环境接入 OIDC/JWT、托管数据库、队列、对象存储、真实知识库和 DSH endpoint。参考服务的 `local-demo` 执行器不会伪装成真实模型推理。
-
-The reference service already includes bearer auth, tenant context, audit records, approval states, signed callbacks, restricted tools, and a deny-by-default runtime policy. Production deployments should add OIDC/JWT, a managed database, a queue, object storage, a real knowledge provider, and a configured DSH endpoint.
+Python and TypeScript SDKs share the OpenAPI and JSON Schema contracts. Provider interfaces cover knowledge, business tools, workflow execution, artifact storage, and event sinks. See [`docs/extensions.md`](docs/extensions.md).
 
 ## 当前版本 | Current status
 
 **v0.1.0 · Framework foundation**
 
-已交付：
+已经包含：参考控制台、API 与 Schema 契约、Python/TypeScript SDK、Scenario Pack manifest、Provider 扩展接口、Docker、CI 和测试。
 
-- 官方 Workbench 控制台和参考服务
-- OpenAPI / JSON Schema 契约
-- Python 同步/异步 SDK
-- TypeScript SDK
-- Scenario Pack manifest
-- 扩展协议和示例
-- Docker、Compose、CI、测试和发布文档
+Ships today: the reference console, API and Schema contracts, Python/TypeScript SDKs, Scenario Pack manifests, Provider interfaces, Docker, CI, and tests.
 
-Shipped in this foundation release:
+生产环境还需要接入 OIDC/JWT、托管数据库、队列、对象存储、真实 Knowledge Provider 和 DSH endpoint。参考服务的 `local-demo` 执行器用于产品体验，不冒充真实模型推理。
 
-- Official Workbench console and reference service
-- OpenAPI / JSON Schema contracts
-- Python sync/async SDK
-- TypeScript SDK
-- Scenario Pack manifest
-- Extension protocols and examples
-- Docker, Compose, CI, tests, and release documentation
+For production, add OIDC/JWT, a managed database, a queue, object storage, a real Knowledge Provider, and a configured DSH endpoint. The `local-demo` executor is for product walkthroughs; it does not pretend to be model inference.
 
-## 路线图 | Roadmap
+## 接下来 | Next milestones
 
-- [ ] 将参考服务拆成可替换的 API、Worker 和 Provider 进程
-- [ ] 增加真实 Knowledge ingestion、Embedding 和引用追踪
-- [ ] 增加队列、重试、取消和并发配额
-- [ ] 增加 OIDC/JWT、组织成员和细粒度权限
+- [ ] 真实 Knowledge ingestion、Embedding 和引用追踪
+- [ ] 队列、重试、取消和并发配额
+- [ ] OIDC/JWT、组织成员和细粒度权限
 - [ ] 发布到 PyPI 和 npm
-- [ ] 建立 Scenario Pack 注册和评测体系
+- [ ] Scenario Pack 注册和评测体系
 
-The next milestones are production workers, real knowledge ingestion, queue-backed execution, enterprise identity, public SDK releases, and a Scenario Pack registry with evaluations.
-
-## 目录 | Repository map
+## 仓库结构 | Repository map
 
 | Path | Responsibility |
 | --- | --- |
@@ -252,13 +224,13 @@ The next milestones are production workers, real knowledge ingestion, queue-back
 | `packs/` | Scenario Pack manifests |
 | `examples/` | Python and TypeScript integration examples |
 | `tests/` | Contract, server, runtime, and SDK tests |
-| `docs/` | Architecture, extensions, and release guides |
+| `docs/` | Architecture, extension, and release guides |
 
-## Contributing
+## 参与贡献 | Contributing
 
-欢迎提交 Issue、Scenario Pack、Provider 实现和文档改进。新增公共字段时，请先更新 OpenAPI/JSON Schema，再同步 Python/TypeScript SDK，并补充兼容性测试。
+欢迎提交 Issue、Scenario Pack、Provider 实现、集成示例和文档改进。新增公共字段时，请先更新 OpenAPI/JSON Schema，再同步两套 SDK，并补充兼容性测试。
 
-Contributions are welcome, especially new Scenario Packs, providers, integration examples, and documentation. When adding a public field, update OpenAPI/JSON Schema first, then update both SDKs and add compatibility tests.
+Contributions are welcome: Scenario Packs, Provider implementations, integration examples, and product improvements. When adding a public field, update OpenAPI/JSON Schema, sync both SDKs, and add compatibility coverage.
 
 ```bash
 make test

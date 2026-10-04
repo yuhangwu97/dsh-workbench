@@ -197,6 +197,6 @@ git status --short
 
 预期：Python/TypeScript 检查、SDK 构建、pack 评测和 diff 检查均退出码 0；没有 Harness secret 时真实 smoke test 明确为 skipped。
 
-- [ ] **步骤 5：提交并推送**
+- [x] **步骤 5：提交并推送**
 
 提交：`feat: make dsh harness the workbench runtime`；确认 `git log -1`、`git status --short` 和远程分支后推送 `main`。

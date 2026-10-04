@@ -1,0 +1,41 @@
+api_version: dsh.workbench/v1
+id: after-sales
+name: 售后诊断
+version: 0.1.0
+description: 从设备日志、产品手册和历史工单生成可追溯的诊断结果。
+skills:
+  - id: equipment-diagnosis
+    version: 1.3.0
+    entrypoint: examples.equipment_diagnosis:run
+    allowed_tools: [kb.search, ticket.read, device.status]
+  - id: fault-code-analysis
+    version: 1.0.0
+    entrypoint: examples.fault_code:run
+    allowed_tools: [kb.search]
+knowledge_sources:
+  - id: product-manuals
+    provider: product-manuals
+    access: [after-sales]
+  - id: historical-tickets
+    provider: historical-tickets
+    access: [after-sales]
+workflows:
+  - id: diagnose-equipment-v2
+    skill_id: equipment-diagnosis
+    steps:
+      - id: retrieve-evidence
+        type: knowledge.search
+      - id: read-device
+        type: skill
+      - id: analyze-fault
+        type: skill
+      - id: request-approval
+        type: approval
+      - id: produce-report
+        type: artifact
+policy:
+  tenant_scope: required
+  shell: false
+  filesystem: restricted
+  network: product-approved-egress
+  business_writes: approval-required

@@ -1,6 +1,32 @@
 {
   "tasks": [
     {
+      "id": "TK-20261004-981E",
+      "name": "Idempotent",
+      "pack_id": "after-sales",
+      "skill_id": "equipment-diagnosis",
+      "input_snapshot": "",
+      "tenant_id": "tenant-demo",
+      "created_by": "user-wu-yuhang",
+      "status": "queued",
+      "status_label": "待运行",
+      "updated": "刚刚",
+      "copy": "任务已创建，等待执行 Skill 和 Workflow。"
+    },
+    {
+      "id": "TK-20261004-DDA6",
+      "name": "Idempotent",
+      "pack_id": "after-sales",
+      "skill_id": "equipment-diagnosis",
+      "input_snapshot": "",
+      "tenant_id": "tenant-demo",
+      "created_by": "user-wu-yuhang",
+      "status": "queued",
+      "status_label": "待运行",
+      "updated": "刚刚",
+      "copy": "任务已创建，等待执行 Skill 和 Workflow。"
+    },
+    {
       "id": "TK-20261004-0021",
       "name": "设备 #3021 故障诊断",
       "pack_id": "after-sales",
@@ -169,5 +195,33 @@
       "status": "published"
     }
   ],
-  "audit": []
+  "audit": [
+    {
+      "id": "audit-9a26b3b3a9",
+      "tenant_id": "tenant-demo",
+      "actor_id": "user-wu-yuhang",
+      "action": "task.created",
+      "resource_type": "task",
+      "resource_id": "TK-20261004-981E",
+      "metadata": {
+        "pack_id": "after-sales",
+        "skill_id": "equipment-diagnosis"
+      },
+      "created_at": "2026-10-03T23:45:14.436512+00:00"
+    },
+    {
+      "id": "audit-ad9c9f6656",
+      "tenant_id": "tenant-demo",
+      "actor_id": "user-wu-yuhang",
+      "action": "task.created",
+      "resource_type": "task",
+      "resource_id": "TK-20261004-DDA6",
+      "metadata": {
+        "pack_id": "after-sales",
+        "skill_id": "equipment-diagnosis"
+      },
+      "created_at": "2026-10-03T23:45:14.435463+00:00"
+    }
+  ],
+  "idempotency": {}
 }

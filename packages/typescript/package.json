@@ -1,0 +1,17 @@
+{
+  "name": "@dsh-workbench/sdk",
+  "version": "0.1.0",
+  "description": "TypeScript SDK for the open-source DSH Workbench AI Task Platform",
+  "type": "module",
+  "license": "Apache-2.0",
+  "engines": {"node": ">=18"},
+  "exports": {".": {"types": "./dist/index.d.ts", "import": "./dist/index.js"}},
+  "files": ["dist", "README.md", "LICENSE"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run build && node --test test/client.test.js",
+    "pack:dry": "npm pack --dry-run"
+  },
+  "devDependencies": {"typescript": "^5.7.2"}
+}

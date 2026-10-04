@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import hmac
 import json
 import mimetypes
@@ -18,7 +19,7 @@ from urllib.parse import urlparse
 from runtime.dsh_runtime import DshRuntime
 
 ROOT = Path(__file__).resolve().parent
-STATE_PATH = ROOT / "data" / "state.json"
+STATE_PATH = Path(os.getenv("WORKBENCH_STATE_PATH", str(ROOT / "data" / "state.json")))
 DB_PATH = ROOT / "data" / "workbench.sqlite3"
 STORAGE_MODE = os.getenv("WORKBENCH_STORAGE", "json").strip().lower() or "json"
 LOCK = threading.Lock()
@@ -26,6 +27,8 @@ DSH_RUNTIME = DshRuntime()
 DEMO_TENANT_ID = "tenant-demo"
 DEMO_ACTOR_ID = "user-wu-yuhang"
 AUTH_TOKEN = os.getenv("WORKBENCH_AUTH_TOKEN", "").strip()
+DSH_CALLBACK_SECRET = os.getenv("DSH_CALLBACK_SECRET", "").strip()
+CALLBACK_MAX_SKEW = int(os.getenv("DSH_CALLBACK_MAX_SKEW", "300"))
 
 PACKS = [
     {"id": "after-sales", "name": "售后诊断", "color": "green", "status": "enabled", "skills": 8, "workflows": 3, "knowledge_bases": 4, "description": "面向售后团队的设备问题定位、证据收集和维修建议。"},
@@ -57,6 +60,7 @@ def seed_state() -> dict:
         ],
         "approvals": [{"id": "TK-20261004-0016", "task_id": "TK-20261004-0016", "status": "pending", "reason": "升级运营告警"}],
         "audit": [],
+        "idempotency": {},
         "artifacts": {
             "TK-20261004-0021": [
                 {"name": "DiagnosisReport.json", "type": "json", "description": "结构化诊断结果 · 24 KB"},
@@ -117,6 +121,9 @@ def load_state() -> dict:
                 changed = True
         if "audit" not in state:
             state["audit"] = seed["audit"]
+            changed = True
+        if "idempotency" not in state or not isinstance(state["idempotency"], dict):
+            state["idempotency"] = {}
             changed = True
         for task in state.get("tasks", []):
             if "input_snapshot" not in task:
@@ -258,15 +265,57 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Request-ID", getattr(self, "request_id", ""))
         self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
         self.wfile.write(body)
+
+    def send_error_json(self, code: str, message: str, status: int, details: dict | None = None) -> None:
+        self.send_json({"error": {"code": code, "message": message, "request_id": getattr(self, "request_id", None), "details": details or {}}}, status)
+
+    def remember_idempotency(self, state: dict, path: str, payload: object, status: int) -> None:
+        key = self.headers.get("Idempotency-Key", "").strip()
+        if not key:
+            return
+        tenant_id, _ = request_context(self)
+        state.setdefault("idempotency", {})[f"{tenant_id}:POST:{path}:{key[:200]}"] = {"status": status, "payload": payload, "fingerprint": hashlib.sha256(getattr(self, "raw_body", b"")).hexdigest()}
+
+    def replay_idempotency(self, state: dict, path: str) -> bool:
+        key = self.headers.get("Idempotency-Key", "").strip()
+        if not key:
+            return False
+        tenant_id, _ = request_context(self)
+        saved = state.get("idempotency", {}).get(f"{tenant_id}:POST:{path}:{key[:200]}")
+        if not saved:
+            return False
+        current_fingerprint = hashlib.sha256(getattr(self, "raw_body", b"")).hexdigest()
+        if saved.get("fingerprint") and saved["fingerprint"] != current_fingerprint:
+            self.send_error_json("idempotency.conflict", "Idempotency-Key was already used with a different request", 409)
+            return True
+        self.send_json(saved["payload"], int(saved["status"]))
+        return True
+
+    def verify_callback_signature(self) -> bool:
+        if not DSH_CALLBACK_SECRET:
+            return True
+        timestamp = self.headers.get("X-DSH-Timestamp", "").strip()
+        signature = self.headers.get("X-DSH-Signature", "").strip()
+        try:
+            timestamp_value = int(timestamp)
+        except ValueError:
+            return False
+        if abs(int(datetime.now(timezone.utc).timestamp()) - timestamp_value) > CALLBACK_MAX_SKEW:
+            return False
+        expected = hmac.new(DSH_CALLBACK_SECRET.encode("utf-8"), f"{timestamp}.".encode("utf-8") + getattr(self, "raw_body", b""), hashlib.sha256).hexdigest()
+        supplied = signature.removeprefix("sha256=")
+        return bool(supplied) and hmac.compare_digest(supplied, expected)
 
     def read_json(self) -> dict:
         length = int(self.headers.get("Content-Length", "0"))
         if length > 1024 * 1024:
             raise ValueError("request body too large")
         raw = self.rfile.read(length) if length else b"{}"
+        self.raw_body = raw
         payload = json.loads(raw.decode("utf-8"))
         if not isinstance(payload, dict):
             raise ValueError("body must be an object")
@@ -276,11 +325,12 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(204)
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Tenant-ID, X-Actor-ID")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Tenant-ID, X-Actor-ID, X-Request-ID, Idempotency-Key, X-DSH-Timestamp, X-DSH-Signature")
         self.send_header("Content-Length", "0")
         self.end_headers()
 
     def do_GET(self):
+        self.request_id = self.headers.get("X-Request-ID", "").strip()[:120] or f"req_{uuid.uuid4().hex[:16]}"
         parsed = urlparse(self.path)
         if parsed.path.startswith("/api/"):
             if not self.authorized(parsed.path):
@@ -290,18 +340,19 @@ class Handler(BaseHTTPRequestHandler):
             self.static_get(parsed.path)
 
     def do_POST(self):
+        self.request_id = self.headers.get("X-Request-ID", "").strip()[:120] or f"req_{uuid.uuid4().hex[:16]}"
         parsed = urlparse(self.path)
         if not parsed.path.startswith("/api/"):
-            self.send_json({"error": "not found"}, 404)
+            self.send_error_json("route.not_found", "not found", 404)
             return
         if not self.authorized(parsed.path):
             return
         try:
             self.api_post(parsed.path, self.read_json())
         except (ValueError, json.JSONDecodeError) as exc:
-            self.send_json({"error": str(exc)}, 400)
+            self.send_error_json("request.invalid", str(exc), 400)
         except Exception as exc:  # keep local demo errors inspectable
-            self.send_json({"error": str(exc)}, 500)
+            self.send_error_json("internal.error", str(exc), 500)
 
     def authorized(self, path: str) -> bool:
         if not AUTH_TOKEN or path in {"/api/v1/health", "/api/v1/ready"}:
@@ -310,7 +361,7 @@ class Handler(BaseHTTPRequestHandler):
         supplied = authorization[7:].strip() if authorization.startswith("Bearer ") else ""
         if supplied and hmac.compare_digest(supplied, AUTH_TOKEN):
             return True
-        self.send_json({"error": "authentication required"}, 401)
+        self.send_error_json("auth.required", "authentication required", 401)
         return False
 
     def static_get(self, path: str):
@@ -361,7 +412,7 @@ class Handler(BaseHTTPRequestHandler):
                 run_id = path.split("/")[4]
                 run = next((item for item in visible_runs if item["id"] == run_id), None)
                 if not run:
-                    self.send_json({"error": "run not found"}, 404)
+                    self.send_error_json("run.not_found", "run not found", 404)
                     return
                 self.send_json(run)
             elif path == "/api/v1/knowledge":
@@ -377,35 +428,39 @@ class Handler(BaseHTTPRequestHandler):
             elif path.startswith("/api/v1/tasks/") and path.endswith("/artifacts"):
                 task_id = path.split("/")[4]
                 if task_id not in visible_task_ids:
-                    self.send_json({"error": "task not found"}, 404)
+                    self.send_error_json("task.not_found", "task not found", 404)
                     return
                 self.send_json(state["artifacts"].get(task_id, []))
             elif path.startswith("/api/v1/tasks/"):
                 task_id = path.split("/")[4]
                 task = next((t for t in visible_tasks if t["id"] == task_id), None)
                 if not task:
-                    self.send_json({"error": "task not found"}, 404)
+                    self.send_error_json("task.not_found", "task not found", 404)
                     return
                 runs = [r for r in state["runs"] if r.get("task_id") == task_id]
                 self.send_json({"task": task, "pack": pack_for(task["pack_id"]), "skill": skill_for(task["skill_id"]), "runs": runs, "artifacts": state["artifacts"].get(task_id, [])})
             else:
-                self.send_json({"error": "not found"}, 404)
+                self.send_error_json("route.not_found", "not found", 404)
 
     def api_post(self, path: str, payload: dict):
         with LOCK:
             state = load_state()
             tenant_id, actor_id = request_context(self)
+            if self.replay_idempotency(state, path):
+                return
             if path == "/api/v1/tasks":
                 name = str(payload.get("name", "")).strip() or "未命名任务"
                 pack_id = str(payload.get("pack_id", "after-sales"))
                 skill_id = str(payload.get("skill_id", "equipment-diagnosis"))
                 if pack_id not in {p["id"] for p in PACKS} or skill_id not in {s["id"] for s in SKILLS}:
-                    self.send_json({"error": "invalid pack or skill"}, 422)
+                    self.send_error_json("task.invalid_reference", "invalid pack or skill", 422)
                     return
                 task_id = f"TK-{datetime.now().strftime('%Y%m%d')}-{uuid.uuid4().hex[:4].upper()}"
                 task = {"id": task_id, "name": name, "pack_id": pack_id, "skill_id": skill_id, "input_snapshot": payload.get("input", ""), "tenant_id": tenant_id, "created_by": actor_id, "status": "queued", "status_label": "待运行", "updated": "刚刚", "copy": "任务已创建，等待执行 Skill 和 Workflow。"}
                 state["tasks"].insert(0, task)
                 record_audit(state, tenant_id=tenant_id, actor_id=actor_id, action="task.created", resource_type="task", resource_id=task_id, metadata={"pack_id": pack_id, "skill_id": skill_id})
+                save_state(state)
+                self.remember_idempotency(state, path, task, 201)
                 save_state(state)
                 self.send_json(task, 201)
             elif path == "/api/v1/knowledge/search":
@@ -424,15 +479,18 @@ class Handler(BaseHTTPRequestHandler):
                 pack = pack_for(str(payload.get("pack_id", "after-sales")))
                 self.send_json({"reply": f"已收到你的问题。我会在“{pack['name']}”范围内检索证据，并可以继续创建 Task。", "evidence_count": 2, "pack_id": pack["id"]}, 201)
             elif path.startswith("/api/v1/runs/") and path.endswith("/callback"):
+                if not self.verify_callback_signature():
+                    self.send_error_json("callback.invalid_signature", "invalid callback signature", 401)
+                    return
                 run_id = path.split("/")[4]
                 run = next((item for item in state["runs"] if item["id"] == run_id), None)
                 if not run or run.get("tenant_id", DEMO_TENANT_ID) != tenant_id:
-                    self.send_json({"error": "run not found"}, 404)
+                    self.send_error_json("run.not_found", "run not found", 404)
                     return
                 status = str(payload.get("status", "")).strip()
                 allowed_statuses = {"queued", "running", "completed", "waiting_approval", "failed", "rejected"}
                 if status not in allowed_statuses:
-                    self.send_json({"error": "invalid run status"}, 422)
+                    self.send_error_json("run.invalid_status", "invalid run status", 422)
                     return
                 run["status"] = status
                 run["message"] = str(payload.get("message", run.get("message", "")))[:500]
@@ -459,11 +517,12 @@ class Handler(BaseHTTPRequestHandler):
                 workflow_id = path.split("/")[4]
                 workflow = next((item for item in state["workflows"] if item["id"] == workflow_id), None)
                 if not workflow:
-                    self.send_json({"error": "workflow not found"}, 404)
+                    self.send_error_json("workflow.not_found", "workflow not found", 404)
                     return
                 run = {"id": f"run-{uuid.uuid4().hex[:8]}", "workflow_id": workflow_id, "tenant_id": tenant_id, "actor_id": actor_id, "runtime": DSH_RUNTIME.metadata(), "status": "queued", "message": "Workflow 已加入运行队列", "created_at": now_iso()}
                 state["runs"].insert(0, run)
                 record_audit(state, tenant_id=tenant_id, actor_id=actor_id, action="workflow.run_queued", resource_type="run", resource_id=run["id"], metadata={"workflow_id": workflow_id})
+                self.remember_idempotency(state, path, run, 201)
                 save_state(state)
                 schedule_local_run(run["id"], workflow_id=workflow_id)
                 self.send_json(run, 201)
@@ -472,6 +531,7 @@ class Handler(BaseHTTPRequestHandler):
                 run = {"id": f"run-{uuid.uuid4().hex[:8]}", "task_id": None, "skill_id": skill_id, "tenant_id": tenant_id, "actor_id": actor_id, "runtime": DSH_RUNTIME.metadata(), "status": "queued", "duration": "", "message": "已加入运行队列", "created_at": now_iso(), "input": payload.get("input", "")}
                 state["runs"].insert(0, run)
                 record_audit(state, tenant_id=tenant_id, actor_id=actor_id, action="skill.run_queued", resource_type="run", resource_id=run["id"], metadata={"skill_id": skill_id})
+                self.remember_idempotency(state, path, run, 201)
                 save_state(state)
                 schedule_local_run(run["id"])
                 self.send_json(run, 201)
@@ -479,10 +539,10 @@ class Handler(BaseHTTPRequestHandler):
                 task_id = path.split("/")[4]
                 task = next((t for t in state["tasks"] if t["id"] == task_id), None)
                 if not task:
-                    self.send_json({"error": "task not found"}, 404)
+                    self.send_error_json("task.not_found", "task not found", 404)
                     return
                 if task.get("tenant_id", DEMO_TENANT_ID) != tenant_id:
-                    self.send_json({"error": "task belongs to another tenant"}, 403)
+                    self.send_error_json("task.forbidden", "task belongs to another tenant", 403)
                     return
                 approval_required = task.get("status") == "approval"
                 run = {"id": f"run-{uuid.uuid4().hex[:8]}", "task_id": task_id, "skill_id": task["skill_id"], "tenant_id": tenant_id, "actor_id": actor_id, "status": "queued", "duration": "", "message": "已加入运行队列", "created_at": now_iso()}
@@ -504,6 +564,7 @@ class Handler(BaseHTTPRequestHandler):
                 record_audit(state, tenant_id=tenant_id, actor_id=actor_id, action="task.run_queued", resource_type="run", resource_id=run["id"], metadata={"task_id": task_id, "skill_id": task["skill_id"]})
                 task["status"] = "approval" if approval_required else "queued"
                 task["status_label"] = "需审批" if approval_required else "待运行"
+                self.remember_idempotency(state, path, run, 201)
                 save_state(state)
                 if not DSH_RUNTIME.configured:
                     schedule_local_run(run["id"], task_id=task_id)
@@ -512,11 +573,11 @@ class Handler(BaseHTTPRequestHandler):
                 task_id = path.split("/")[4]
                 decision = "approved" if path.endswith("/approve") else "rejected" if path.endswith("/reject") else None
                 if not decision:
-                    self.send_json({"error": "unknown approval action"}, 404)
+                    self.send_error_json("approval.invalid_action", "unknown approval action", 404)
                     return
                 target_task = next((task for task in state["tasks"] if task["id"] == task_id), None)
                 if not target_task or target_task.get("tenant_id", DEMO_TENANT_ID) != tenant_id:
-                    self.send_json({"error": "task not found"}, 404)
+                    self.send_error_json("task.not_found", "task not found", 404)
                     return
                 resumed_runs = []
                 for approval in state["approvals"]:
@@ -545,7 +606,7 @@ class Handler(BaseHTTPRequestHandler):
                 save_state(state)
                 self.send_json({"task_id": task_id, "status": decision, "resumed_runs": resumed_runs})
             else:
-                self.send_json({"error": "not found"}, 404)
+                self.send_error_json("route.not_found", "not found", 404)
 
 
 def main() -> None:

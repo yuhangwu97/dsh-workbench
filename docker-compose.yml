@@ -6,6 +6,8 @@ services:
     environment:
       WORKBENCH_AUTH_TOKEN: ${WORKBENCH_AUTH_TOKEN:-}
       DSH_ENDPOINT: ${DSH_ENDPOINT:-}
+      DSH_CALLBACK_SECRET: ${DSH_CALLBACK_SECRET:-}
+      DSH_CALLBACK_MAX_SKEW: ${DSH_CALLBACK_MAX_SKEW:-300}
       WORKBENCH_STORAGE: ${WORKBENCH_STORAGE:-sqlite}
     volumes:
       - workbench-data:/app/data

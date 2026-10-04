@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dsh-workbench.dev/schemas/task.json",
+  "title": "Task",
+  "type": "object",
+  "required": ["id", "name", "pack_id", "skill_id", "status"],
+  "properties": {
+    "id": {"type": "string", "minLength": 1},
+    "name": {"type": "string", "minLength": 1},
+    "pack_id": {"type": "string"},
+    "skill_id": {"type": "string"},
+    "status": {"type": "string"},
+    "status_label": {"type": ["string", "null"]},
+    "input_snapshot": {},
+    "tenant_id": {"type": ["string", "null"]},
+    "created_by": {"type": ["string", "null"]},
+    "updated": {"type": ["string", "null"]},
+    "copy": {"type": ["string", "null"]}
+  },
+  "additionalProperties": true
+}

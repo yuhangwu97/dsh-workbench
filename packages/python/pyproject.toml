@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dsh-workbench"
+version = "0.1.0"
+description = "Python SDK for the open-source DSH Workbench AI Task Platform"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{name = "Yuhang Wu"}]
+license = {text = "Apache-2.0"}
+keywords = ["ai", "agents", "workflow", "knowledge-base", "task-platform"]
+classifiers = ["Programming Language :: Python :: 3", "Typing :: Typed"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

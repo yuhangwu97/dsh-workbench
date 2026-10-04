@@ -2,6 +2,8 @@
 
 面向企业的 AI Task Platform 前端 Demo。平台把业务输入统一成 Task，用 Scenario Pack 组织 Skills、Knowledge、Workflows 和审批策略，适合作为 DSH 运行时的产品层工作台。
 
+这是一个可以自托管和二次开发的开源框架。Workbench 是官方控制台和参考服务；`contracts/` 是公共 HTTP/JSON 契约；`packages/python` 和 `packages/typescript` 是给外部应用使用的 SDK。
+
 ## 当前 Demo
 
 - **Chat Intake**：接收问题、显示证据并可转为 Task
@@ -14,6 +16,40 @@
 - **Task Detail**：Overview、Run trace、Artifacts 三个视图，可直接运行 Task
 - **New Task**：选择场景包和 Skill，创建任务并立即加入任务列表
 - **本地状态**：当前场景包选择保存在 `localStorage`
+
+## SDK 快速开始
+
+Python：
+
+```bash
+python -m pip install dsh-workbench
+```
+
+```python
+from dsh_workbench import DSHClient
+
+client = DSHClient("http://localhost:8766", tenant_id="tenant-demo")
+task = client.tasks.create(name="设备诊断", pack_id="after-sales", skill_id="equipment-diagnosis")
+run = client.tasks.run(task.id)
+completed = client.runs.wait(run.id)
+print(completed.status.value)
+```
+
+TypeScript：
+
+```bash
+npm install @dsh-workbench/sdk
+```
+
+```ts
+import { DSHClient } from '@dsh-workbench/sdk';
+
+const client = new DSHClient({ baseUrl: 'http://localhost:8766', tenantId: 'tenant-demo' });
+const task = await client.tasks.create({ name: '设备诊断', packId: 'after-sales', skillId: 'equipment-diagnosis' });
+const run = await client.tasks.run(task.id);
+const completed = await client.runs.wait(run.id);
+console.log(completed.status);
+```
 
 ## 运行
 
@@ -56,6 +92,8 @@ Task
 
 DSH 负责复杂推理和运行时编排；产品层负责 Task 状态、场景范围、权限、审批、审计和 Artifact 生命周期。当前仓库已经包含可持久化的本地 API；生产环境可将 `server.py` 替换为 Go/FastAPI 服务，并把 DSH 作为受限运行时接入。
 
+扩展点见 [docs/extensions.md](docs/extensions.md)。公共 API 变更必须先更新 OpenAPI 和 JSON Schema，再同步两套 SDK。
+
 ## 目录
 
 - `index.html`：工作台信息架构和页面骨架
@@ -63,6 +101,12 @@ DSH 负责复杂推理和运行时编排；产品层负责 Task 状态、场景�
 - `app.js`：导航、场景包切换、任务创建、Skill 试运行、Task Drawer 交互和 API 数据同步
 - `server.py`：无第三方依赖的 API + 静态文件服务器，支持 Bearer 保护和健康检查
 - `runtime/dsh_runtime.py`：DSH 受限运行时边界和结构化 Run 请求契约
+- `contracts/openapi.yaml`：版本化 HTTP API 契约
+- `contracts/schemas/`：Task、Run、Event、Error JSON Schema
+- `packages/python/`：Python SDK 和扩展 Protocol
+- `packages/typescript/`：TypeScript SDK 和扩展 interface
+- `packs/after-sales/`：可复制的 Scenario Pack manifest
+- `examples/`：Python/TypeScript 接入示例
 - `data/state.json`：本地 JSON 模式的可持久化 Task、Run、Approval、Artifact 状态
 - `data/workbench.sqlite3`：Compose SQLite 模式的持久化状态文件
 - `Dockerfile` / `docker-compose.yml`：可直接启动的容器部署入口

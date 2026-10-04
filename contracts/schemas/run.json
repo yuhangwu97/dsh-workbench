@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dsh-workbench.dev/schemas/run.json",
+  "title": "Run",
+  "type": "object",
+  "required": ["id", "status"],
+  "properties": {
+    "id": {"type": "string", "minLength": 1},
+    "status": {"enum": ["queued", "running", "completed", "waiting_approval", "failed", "rejected"]},
+    "task_id": {"type": ["string", "null"]},
+    "workflow_id": {"type": ["string", "null"]},
+    "skill_id": {"type": ["string", "null"]},
+    "message": {"type": ["string", "null"]},
+    "created_at": {"type": ["string", "null"], "format": "date-time"},
+    "started_at": {"type": ["string", "null"], "format": "date-time"},
+    "finished_at": {"type": ["string", "null"], "format": "date-time"},
+    "tenant_id": {"type": ["string", "null"]},
+    "actor_id": {"type": ["string", "null"]},
+    "runtime": {"type": "object"},
+    "duration": {"type": ["string", "null"]}
+  },
+  "additionalProperties": true
+}

@@ -39,3 +39,7 @@ ApprovalPolicy 决定动作是否需要人工确认；EventSink 用于接入 Kaf
 ## Scenario Pack 评测
 
 运行 `python3 tools_evaluate_packs.py` 可以检查所有 Pack manifest 是否声明版本、Skills、Knowledge、Workflow 和安全策略。服务端的 `POST /api/v1/scenario-packs/{pack_id}/evaluations` 会把评测结果留在审计和评测记录中。
+
+### Remote embedding 与 rerank
+
+设置 `WORKBENCH_EMBEDDING_ENDPOINT` 后，ingestion 和 query 会调用 OpenAI-compatible `POST /embeddings` 形状的接口；设置 `WORKBENCH_RERANK_ENDPOINT` 后，候选片段会交给 Cohere-compatible `results` 接口重排。没有配置时继续使用 `local-hash-v1`，这样本地 Demo 不需要网络或额外依赖。

@@ -206,15 +206,15 @@ For production, add OIDC/JWT, a managed database, a queue, object storage, a rea
 
 ## 现在已经可以继续什么 | What is already wired
 
-- [x] Knowledge ingestion、chunk embedding 和 citation records（默认 `local-hash-v1`，可替换 Provider）
+- [x] Knowledge ingestion、chunk embedding 和 citation records（默认 `local-hash-v1`，可通过环境变量切换远程 Embedding/Rerank Provider）
 - [x] Run queue 状态、并发上限、取消、重试和最大尝试次数
 - [x] HS256 JWT、issuer 校验、组织成员和角色权限边界
 - [x] PyPI/npm 的 tag release workflow（配置 Trusted Publishing 和 `NPM_TOKEN` 后发布）
-- [x] Scenario Pack manifest 评测命令和服务端评测记录
+- [x] Scenario Pack registry、manifest 评测命令和服务端评测记录
 
 ## 接下来 | Next milestones
 
-- [ ] 接入真实 embedding / rerank 服务和异步 ingestion worker
+- [ ] 增加异步 ingestion worker、批量导入和失败重试
 - [ ] 把本地线程队列替换为 Redis、SQS 或 Kafka worker
 - [ ] 增加 OIDC discovery、JWKS rotation 和组织级权限策略
 - [ ] 发布第一个公开 PyPI/npm 版本

@@ -79,3 +79,15 @@ draft → queued → running → waiting_approval → completed
 ```
 
 高风险动作只允许进入 `waiting_approval`，不能因为模型建议就直接执行。
+
+## Registry 与评测
+
+仓库中的 `registry/scenario-packs.json` 是一个可版本化的 Pack 目录，默认收录售后诊断、研发助手和运营告警。服务端通过 `GET /api/v1/registry/scenario-packs` 暴露目录，管理员可以用 `POST` 注册新的 `packs/` manifest。
+
+注册后可以调用 `POST /api/v1/scenario-packs/{pack_id}/evaluations`，或在本地执行：
+
+```bash
+python3 tools_evaluate_packs.py
+```
+
+评测至少检查 manifest 元数据、Skills、Knowledge Sources、Workflows、租户范围和业务写入审批策略。

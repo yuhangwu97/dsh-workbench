@@ -332,6 +332,21 @@ paths:
         content: {application/json: {schema: {type: object, required: [email], properties: {email: {type: string, format: email}, role: {type: string}}}}}
       responses:
         '201': {description: Invited member, content: {application/json: {schema: {type: object}}}}
+  /api/v1/registry/scenario-packs:
+    get:
+      tags: [Scenario Packs]
+      operationId: listRegisteredScenarioPacks
+      responses:
+        '200': {description: Registered Scenario Pack manifests, content: {application/json: {schema: {type: object}}}}
+    post:
+      tags: [Scenario Packs]
+      operationId: registerScenarioPack
+      parameters: [{$ref: '#/components/parameters/Idempotency-Key'}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {type: object, required: [id, version, manifest], properties: {id: {type: string}, version: {type: string}, manifest: {type: string}}}}}
+      responses:
+        '201': {description: Registered pack, content: {application/json: {schema: {type: object}}}}
   /api/v1/scenario-packs/{pack_id}/evaluations:
     get:
       tags: [Scenario Packs]

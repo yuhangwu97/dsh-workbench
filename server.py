@@ -36,7 +36,7 @@ JWT_SECRET = os.getenv("WORKBENCH_JWT_SECRET", "").strip()
 OIDC_ISSUER = os.getenv("WORKBENCH_OIDC_ISSUER", "").strip()
 MAX_CONCURRENCY = max(1, int(os.getenv("WORKBENCH_MAX_CONCURRENCY", "4")))
 RUN_SEMAPHORE = threading.BoundedSemaphore(MAX_CONCURRENCY)
-KNOWLEDGE_INDEX = KnowledgeIndex()
+KNOWLEDGE_INDEX = KnowledgeIndex.from_env()
 
 PACKS = [
     {"id": "after-sales", "name": "售后诊断", "color": "green", "status": "enabled", "skills": 8, "workflows": 3, "knowledge_bases": 4, "description": "面向售后团队的设备问题定位、证据收集和维修建议。"},
@@ -57,6 +57,14 @@ SEED_TASKS = [
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+def load_registry() -> list[dict]:
+    path = ROOT / "registry" / "scenario-packs.json"
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        return [item for item in payload.get("packs", []) if isinstance(item, dict)]
+    except (OSError, json.JSONDecodeError, AttributeError):
+        return []
 
 def seed_state() -> dict:
     knowledge_documents = [
@@ -95,6 +103,7 @@ def seed_state() -> dict:
         "citations": [],
         "org_members": [{"id": DEMO_ACTOR_ID, "email": "yuhang@example.com", "role": "owner", "status": "active"}],
         "pack_evaluations": [],
+        "pack_registry": load_registry(),
         "workflows": [
             {"id": "diagnose-equipment-v2", "name": "售后诊断 v2", "pack_id": "after-sales", "steps": 5, "status": "published"},
             {"id": "issue-to-patch-plan", "name": "Issue to Patch Plan", "pack_id": "engineering", "steps": 4, "status": "published"},
@@ -137,7 +146,7 @@ def load_state() -> dict:
     try:
         seed = seed_state()
         changed = False
-        for key in ("knowledge", "knowledge_documents", "knowledge_chunks", "citations", "org_members", "pack_evaluations", "workflows"):
+        for key in ("knowledge", "knowledge_documents", "knowledge_chunks", "citations", "org_members", "pack_evaluations", "pack_registry", "workflows"):
             if key not in state:
                 state[key] = seed[key]
                 changed = True
@@ -513,6 +522,8 @@ class Handler(BaseHTTPRequestHandler):
                 approvals = [approval for approval in state["approvals"] if approval.get("task_id") in visible_task_ids]
                 artifacts = {task_id: items for task_id, items in state["artifacts"].items() if task_id in visible_task_ids}
                 self.send_json({"packs": PACKS, "skills": SKILLS, "tasks": visible_tasks, "runs": visible_runs, "approvals": approvals, "knowledge": state["knowledge"], "workflows": state["workflows"], "artifacts": artifacts, "metrics": {"open_tasks": sum(t["status"] != "completed" for t in visible_tasks), "runs_this_week": 148, "completion_rate": 86, "waiting_approval": len([a for a in approvals if a["status"] == "pending"])}, "context": {"tenant_id": tenant_id}})
+            elif path == "/api/v1/registry/scenario-packs":
+                self.send_json({"registry_version": "dsh.workbench/registry.v1", "packs": state.get("pack_registry", load_registry())})
             elif path == "/api/v1/scenario-packs":
                 self.send_json(PACKS)
             elif path == "/api/v1/skills":
@@ -538,7 +549,7 @@ class Handler(BaseHTTPRequestHandler):
                 source_views = []
                 for source in state["knowledge"]:
                     chunks = [chunk for chunk in state.get("knowledge_chunks", []) if chunk.get("source_id") == source["id"]]
-                    source_views.append({**source, "chunks": len(chunks), "embedding": "local-hash-v1"})
+                    source_views.append({**source, "chunks": len(chunks), "embedding": KNOWLEDGE_INDEX.provider_name})
                 self.send_json(source_views)
             elif path == "/api/v1/knowledge/citations":
                 self.send_json([citation for citation in state.get("citations", []) if citation.get("tenant_id", tenant_id) == tenant_id])
@@ -619,10 +630,10 @@ class Handler(BaseHTTPRequestHandler):
                 state["knowledge_chunks"].extend(chunks)
                 source["documents"] = len([item for item in state["knowledge_documents"] if item.get("source_id") == source_id])
                 source["status"] = "ready"
-                record_audit(state, tenant_id=tenant_id, actor_id=actor_id, action="knowledge.ingested", resource_type="knowledge_source", resource_id=source_id, metadata={"document_id": document_id, "chunks": len(chunks), "embedding": "local-hash-v1"})
-                self.remember_idempotency(state, path, {"source": source, "document": {k: v for k, v in document.items() if k != "content"}, "chunks": len(chunks), "embedding": "local-hash-v1"}, 201)
+                record_audit(state, tenant_id=tenant_id, actor_id=actor_id, action="knowledge.ingested", resource_type="knowledge_source", resource_id=source_id, metadata={"document_id": document_id, "chunks": len(chunks), "embedding": KNOWLEDGE_INDEX.provider_name})
+                self.remember_idempotency(state, path, {"source": source, "document": {k: v for k, v in document.items() if k != "content"}, "chunks": len(chunks), "embedding": KNOWLEDGE_INDEX.provider_name}, 201)
                 save_state(state)
-                self.send_json({"source": source, "document": {k: v for k, v in document.items() if k != "content"}, "chunks": len(chunks), "embedding": "local-hash-v1"}, 201)
+                self.send_json({"source": source, "document": {k: v for k, v in document.items() if k != "content"}, "chunks": len(chunks), "embedding": KNOWLEDGE_INDEX.provider_name}, 201)
             elif path == "/api/v1/knowledge/search":
                 query = str(payload.get("query", "")).strip()
                 if not query:
@@ -645,11 +656,26 @@ class Handler(BaseHTTPRequestHandler):
                 state.setdefault("citations", []).extend(citations)
                 if citations:
                     save_state(state)
-                self.send_json({"query": query, "pack_id": pack_id, "matches": matches, "citations": citations, "embedding": "local-hash-v1"}, 200)
+                self.send_json({"query": query, "pack_id": pack_id, "matches": matches, "citations": citations, "embedding": KNOWLEDGE_INDEX.provider_name}, 200)
             elif path == "/api/v1/chat/messages":
                 message = str(payload.get("message", "")).strip()
                 pack = pack_for(str(payload.get("pack_id", "after-sales")))
                 self.send_json({"reply": f"已收到你的问题。我会在“{pack['name']}”范围内检索证据，并可以继续创建 Task。", "evidence_count": 2, "pack_id": pack["id"]}, 201)
+            elif path == "/api/v1/registry/scenario-packs":
+                if not self.require_role("owner", "admin"):
+                    return
+                pack_id = str(payload.get("id", "")).strip()
+                version = str(payload.get("version", "")).strip()
+                manifest = str(payload.get("manifest", "")).strip()
+                if not pack_id or not version or not manifest or not manifest.startswith("packs/"):
+                    self.send_error_json("registry.invalid", "id, version and a packs/ manifest path are required", 422)
+                    return
+                entry = {"id": pack_id, "version": version, "manifest": manifest, "status": "registered", "tenant_id": tenant_id, "registered_by": actor_id, "registered_at": now_iso()}
+                state.setdefault("pack_registry", []).insert(0, entry)
+                record_audit(state, tenant_id=tenant_id, actor_id=actor_id, action="scenario_pack.registered", resource_type="scenario_pack", resource_id=pack_id, metadata={"version": version, "manifest": manifest})
+                self.remember_idempotency(state, path, entry, 201)
+                save_state(state)
+                self.send_json(entry, 201)
             elif path.startswith("/api/v1/scenario-packs/") and path.endswith("/evaluations"):
                 if not self.require_role("owner", "admin", "editor"):
                     return

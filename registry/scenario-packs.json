@@ -1,0 +1,8 @@
+{
+  "registry_version": "dsh.workbench/registry.v1",
+  "packs": [
+    {"id": "after-sales", "version": "0.1.0", "manifest": "packs/after-sales/pack.yaml", "status": "verified"},
+    {"id": "engineering", "version": "0.1.0", "manifest": "packs/engineering/pack.yaml", "status": "verified"},
+    {"id": "operations", "version": "0.1.0", "manifest": "packs/operations/pack.yaml", "status": "verified"}
+  ]
+}

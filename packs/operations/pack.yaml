@@ -1,0 +1,32 @@
+api_version: dsh.workbench/v1
+id: operations
+name: 运营告警
+version: 0.1.0
+description: 聚合告警、匹配 Runbook，并在升级前保留影响分析和审批记录。
+skills:
+  - id: alert-triage
+    version: 2.1.0
+    entrypoint: examples.alert_triage:run
+    allowed_tools: [alert.read, runbook.search]
+knowledge_sources:
+  - id: runbooks
+    provider: runbooks
+    access: [operations]
+workflows:
+  - id: alert-to-escalation
+    skill_id: alert-triage
+    steps:
+      - id: group-alerts
+        type: skill
+      - id: match-runbook
+        type: knowledge.search
+      - id: request-approval
+        type: approval
+      - id: produce-summary
+        type: artifact
+policy:
+  tenant_scope: required
+  shell: false
+  filesystem: restricted
+  network: operations-approved-egress
+  business_writes: approval-required

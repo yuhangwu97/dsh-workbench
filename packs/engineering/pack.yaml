@@ -1,0 +1,30 @@
+api_version: dsh.workbench/v1
+id: engineering
+name: 研发助手
+version: 0.1.0
+description: 把 Issue、代码上下文和复现信息组织成可执行的工程调查。
+skills:
+  - id: issue-investigation
+    version: 0.8.2
+    entrypoint: examples.issue_investigation:run
+    allowed_tools: [repo.read, issue.read, search]
+knowledge_sources:
+  - id: repository-docs
+    provider: repository-docs
+    access: [engineering]
+workflows:
+  - id: issue-to-patch-plan
+    skill_id: issue-investigation
+    steps:
+      - id: gather-context
+        type: knowledge.search
+      - id: investigate
+        type: skill
+      - id: produce-plan
+        type: artifact
+policy:
+  tenant_scope: required
+  shell: false
+  filesystem: restricted
+  network: repository-approved-egress
+  business_writes: approval-required

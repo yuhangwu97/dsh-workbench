@@ -12,7 +12,7 @@ from typing import Any, Callable, Mapping
 from urllib.parse import quote
 
 from .errors import APIError, AuthenticationError, ConflictError, NotFoundError, PermissionError, ServerError, ValidationError
-from .models import Artifact, Run, Task, RunStatus, is_terminal_run_status
+from .models import Artifact, Page, Run, Task, RunStatus, is_terminal_run_status
 
 
 @dataclass
@@ -128,8 +128,11 @@ class TasksResource:
         return Task.from_dict(payload["task"] if isinstance(payload, dict) and "task" in payload else payload)
 
     def list(self, *, page_size: int | None = None, page_token: str | None = None) -> list[Task]:
-        query = _query(page_size=page_size, page_token=page_token)
-        return [Task.from_dict(item) for item in _items(self.client._request("GET", f"/api/v1/tasks{query}"))]
+        return self.list_page(page_size=page_size, page_token=page_token).items
+
+    def list_page(self, *, page_size: int | None = None, page_token: str | None = None) -> Page:
+        payload = self.client._request("GET", f"/api/v1/tasks{_query(page_size=page_size, page_token=page_token)}")
+        return Page(items=[Task.from_dict(item) for item in _items(payload)], next_page_token=payload.get("next_page_token") if isinstance(payload, dict) else None)
 
     def run(self, task_id: str, *, input: Any = None, idempotency_key: str | None = None) -> Run:
         return Run.from_dict(self.client._request("POST", f"/api/v1/tasks/{quote(task_id, safe='')}/runs", {"input": input} if input is not None else {}, idempotency_key=idempotency_key))
@@ -143,7 +146,11 @@ class RunsResource:
         return Run.from_dict(self.client._request("GET", f"/api/v1/runs/{quote(run_id, safe='')}"))
 
     def list(self, *, page_size: int | None = None, page_token: str | None = None) -> list[Run]:
-        return [Run.from_dict(item) for item in _items(self.client._request("GET", f"/api/v1/runs{_query(page_size=page_size, page_token=page_token)}"))]
+        return self.list_page(page_size=page_size, page_token=page_token).items
+
+    def list_page(self, *, page_size: int | None = None, page_token: str | None = None) -> Page:
+        payload = self.client._request("GET", f"/api/v1/runs{_query(page_size=page_size, page_token=page_token)}")
+        return Page(items=[Run.from_dict(item) for item in _items(payload)], next_page_token=payload.get("next_page_token") if isinstance(payload, dict) else None)
 
     def wait(self, run_id: str, *, timeout: float = 300.0, poll_interval: float | None = None) -> Run:
         deadline = time.monotonic() + timeout
@@ -203,6 +210,10 @@ class ArtifactsResource:
     def list(self, *, task_id: str | None = None) -> list[Artifact]:
         path = f"/api/v1/tasks/{quote(task_id, safe='')}/artifacts" if task_id else "/api/v1/artifacts"
         return [Artifact.from_dict(item) for item in _items(self.client._request("GET", path))]
+
+    def list_page(self, *, page_size: int | None = None, page_token: str | None = None) -> Page:
+        payload = self.client._request("GET", f"/api/v1/artifacts{_query(page_size=page_size, page_token=page_token)}")
+        return Page(items=[Artifact.from_dict(item) for item in _items(payload)], next_page_token=payload.get("next_page_token") if isinstance(payload, dict) else None)
 
     def get(self, artifact_id: str, *, task_id: str | None = None) -> Artifact:
         artifacts = self.list(task_id=task_id)

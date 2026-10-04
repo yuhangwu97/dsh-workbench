@@ -3,5 +3,8 @@
 .DS_Store
 __pycache__
 *.pyc
+node_modules
+packages/typescript/dist
+tests
 docs
 README.md

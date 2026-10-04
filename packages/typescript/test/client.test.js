@@ -40,3 +40,16 @@ test('maps error envelope to typed error', async () => {
   });
   await assert.rejects(client.tasks.get('missing'), (error) => error instanceof NotFoundError && error.requestId === 'req-2');
 });
+
+test('exposes page token for list calls', async () => {
+  const client = new DSHClient({
+    baseUrl: 'https://workbench.test',
+    fetchImpl: async (url) => {
+      assert.match(url, /page_size=1/);
+      return response(200, { items: [{ id: 'task-1', name: 'A', pack_id: 'after-sales', skill_id: 'equipment-diagnosis', status: 'queued' }], next_page_token: '1' });
+    },
+  });
+  const page = await client.tasks.listPage({ pageSize: 1 });
+  assert.equal(page.nextPageToken, '1');
+  assert.equal(page.items[0].id, 'task-1');
+});

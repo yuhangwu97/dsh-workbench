@@ -66,3 +66,11 @@ def test_async_client_exposes_same_resource_shape():
 
     response = asyncio.run(client.chat.send("hello"))
     assert response["evidence_count"] == 2
+
+
+def test_client_exposes_page_token_for_large_lists():
+    transport = FakeTransport([Response(200, {"items": [{"id": "task-1", "name": "A"}], "next_page_token": "1"}, {})])
+    client = DSHClient("https://workbench.test", transport=transport)
+    page = client.tasks.list_page(page_size=1)
+    assert page.next_page_token == "1"
+    assert page.items[0].id == "task-1"

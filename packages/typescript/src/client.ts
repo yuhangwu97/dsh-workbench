@@ -1,5 +1,5 @@
 import { errorForStatus, ErrorEnvelope } from './errors.js';
-import { Artifact, ChatResponse, isTerminalRun, KnowledgeSearchResponse, Run, Task } from './resources.js';
+import { Artifact, ChatResponse, isTerminalRun, KnowledgeSearchResponse, Page, Run, Task } from './resources.js';
 
 export interface DSHClientOptions {
   baseUrl: string;
@@ -85,14 +85,16 @@ class TasksResource {
   constructor(private readonly client: DSHClient) {}
   create(input: CreateTaskInput): Promise<Task> { return this.client.request<Task>('POST', '/api/v1/tasks', { name: input.name, pack_id: input.packId, skill_id: input.skillId, input: input.input }, input.idempotencyKey); }
   async get(taskId: string): Promise<Task> { const payload = await this.client.request<Task | {task: Task}>('GET', `/api/v1/tasks/${encodeURIComponent(taskId)}`); const detail = payload as Task | { task: Task }; return typeof detail === 'object' && detail !== null && 'task' in detail ? (detail as { task: Task }).task : detail as Task; }
-  async list(): Promise<Task[]> { return this.client.request<Task[]>('GET', '/api/v1/tasks'); }
+  async list(options: { pageSize?: number; pageToken?: string } = {}): Promise<Task[]> { return (await this.listPage(options)).items; }
+  async listPage(options: { pageSize?: number; pageToken?: string } = {}): Promise<Page<Task>> { const query = new URLSearchParams(); if (options.pageSize !== undefined) query.set('page_size', String(options.pageSize)); if (options.pageToken) query.set('page_token', options.pageToken); const payload = await this.client.request<Task[] | { items: Task[]; next_page_token?: string | null }>('GET', `/api/v1/tasks${query.toString() ? `?${query}` : ''}`); return Array.isArray(payload) ? { items: payload, nextPageToken: null } : { items: payload.items, nextPageToken: payload.next_page_token ?? null }; }
   run(taskId: string, input?: unknown, idempotencyKey?: string): Promise<Run> { return this.client.request<Run>('POST', `/api/v1/tasks/${encodeURIComponent(taskId)}/runs`, input === undefined ? {} : { input }, idempotencyKey); }
 }
 
 class RunsResource {
   constructor(private readonly client: DSHClient) {}
   get(runId: string): Promise<Run> { return this.client.request<Run>('GET', `/api/v1/runs/${encodeURIComponent(runId)}`); }
-  list(): Promise<Run[]> { return this.client.request<Run[]>('GET', '/api/v1/runs'); }
+  async list(options: { pageSize?: number; pageToken?: string } = {}): Promise<Run[]> { return (await this.listPage(options)).items; }
+  async listPage(options: { pageSize?: number; pageToken?: string } = {}): Promise<Page<Run>> { const query = new URLSearchParams(); if (options.pageSize !== undefined) query.set('page_size', String(options.pageSize)); if (options.pageToken) query.set('page_token', options.pageToken); const payload = await this.client.request<Run[] | { items: Run[]; next_page_token?: string | null }>('GET', `/api/v1/runs${query.toString() ? `?${query}` : ''}`); return Array.isArray(payload) ? { items: payload, nextPageToken: null } : { items: payload.items, nextPageToken: payload.next_page_token ?? null }; }
   wait(runId: string, options?: { timeoutMs?: number; pollIntervalMs?: number }): Promise<Run> { return this.client.wait(runId, options); }
 }
 
@@ -120,5 +122,6 @@ class ApprovalsResource {
 class ArtifactsResource {
   constructor(private readonly client: DSHClient) {}
   list(taskId?: string): Promise<Artifact[]> { return this.client.request<Artifact[]>('GET', taskId ? `/api/v1/tasks/${encodeURIComponent(taskId)}/artifacts` : '/api/v1/artifacts'); }
+  async listPage(options: { pageSize?: number; pageToken?: string } = {}): Promise<Page<Artifact>> { const query = new URLSearchParams(); if (options.pageSize !== undefined) query.set('page_size', String(options.pageSize)); if (options.pageToken) query.set('page_token', options.pageToken); const payload = await this.client.request<Artifact[] | { items: Artifact[]; next_page_token?: string | null }>('GET', `/api/v1/artifacts${query.toString() ? `?${query}` : ''}`); return Array.isArray(payload) ? { items: payload, nextPageToken: null } : { items: payload.items, nextPageToken: payload.next_page_token ?? null }; }
   async get(artifactId: string, taskId?: string): Promise<Artifact> { const artifacts = await this.list(taskId); const artifact = artifacts.find(item => item.id === artifactId || item.name === artifactId); if (!artifact) throw errorForStatus(404, 'artifact.not_found', 'artifact not found'); return artifact; }
 }

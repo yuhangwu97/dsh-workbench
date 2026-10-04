@@ -49,6 +49,11 @@ export interface KnowledgeSearchResponse {
   [key: string]: unknown;
 }
 
+export interface Page<T> {
+  items: T[];
+  nextPageToken?: string | null;
+}
+
 export function isTerminalRun(run: Pick<Run, 'status'>): boolean {
   return run.status === 'completed' || run.status === 'failed' || run.status === 'rejected';
 }

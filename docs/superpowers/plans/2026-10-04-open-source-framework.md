@@ -23,12 +23,12 @@
 - 创建：`contracts/schemas/error.json`
 - 测试：`tests/test_contracts.py`
 
-- [ ] 定义 Task、Run、Artifact、Event、Page、ErrorEnvelope 的跨语言字段和状态枚举。
-- [ ] Python 使用 `dataclass` 和 `Enum`，提供从 JSON 映射的 `from_dict`，缺失必填字段抛出 `ModelError`。
-- [ ] TypeScript 使用 `type`/`interface` 和窄化函数，导出 `RunStatus` 和 `isRunTerminal`。
-- [ ] 用 JSON Schema 校验一份 completed Run、waiting approval Run 和错误响应。
-- [ ] 运行 `python -m pytest tests/test_contracts.py -q`，预期全部通过。
-- [ ] 提交 `feat: add cross-language resource contracts`。
+- [x] 定义 Task、Run、Artifact、Event、Page、ErrorEnvelope 的跨语言字段和状态枚举。
+- [x] Python 使用 `dataclass` 和 `Enum`，提供从 JSON 映射的 `from_dict`，缺失必填字段抛出 `ModelError`。
+- [x] TypeScript 使用 `type`/`interface` 和窄化函数，导出 `RunStatus` 和 `isRunTerminal`。
+- [x] 用 JSON Schema 校验一份 completed Run、waiting approval Run 和错误响应。
+- [x] 运行 `python -m pytest tests/test_contracts.py -q`，预期全部通过。
+- [x] 提交 `feat: add cross-language resource contracts`。
 
 ### 任务 2：OpenAPI v1 契约
 
@@ -37,12 +37,12 @@
 - 修改：`docs/product-architecture.md`
 - 测试：`tests/test_openapi_contract.py`
 
-- [ ] 描述 dashboard、packs、tasks、runs、knowledge/search、chat/messages、workflow runs、approvals、artifacts 和 callback 接口。
-- [ ] 统一声明 `Authorization`、`X-Tenant-ID`、`X-Actor-ID`、`X-Request-ID` 和 `Idempotency-Key`。
-- [ ] 所有响应引用 `contracts/schemas` 中的模型；写接口声明 201、400、401、403、404、409、422。
-- [ ] 用 Python 标准库做最小 OpenAPI 结构校验，保证 paths、schemas 和 response 引用存在。
-- [ ] 运行 `python -m pytest tests/test_openapi_contract.py -q`。
-- [ ] 提交 `docs: publish versioned openapi contract`。
+- [x] 描述 dashboard、packs、tasks、runs、knowledge/search、chat/messages、workflow runs、approvals、artifacts 和 callback 接口。
+- [x] 统一声明 `Authorization`、`X-Tenant-ID`、`X-Actor-ID`、`X-Request-ID` 和 `Idempotency-Key`。
+- [x] 所有响应引用 `contracts/schemas` 中的模型；写接口声明 201、400、401、403、404、409、422。
+- [x] 用 Python 标准库做最小 OpenAPI 结构校验，保证 paths、schemas 和 response 引用存在。
+- [x] 运行 `python -m pytest tests/test_openapi_contract.py -q`。
+- [x] 提交 `docs: publish versioned openapi contract`。
 
 ### 任务 3：参考服务的生产化 API 基础能力
 
@@ -52,14 +52,14 @@
 - 创建：`tests/test_server_contract.py`
 - 创建：`tests/test_server_security.py`
 
-- [ ] 增加 `X-Request-ID` 生成/透传和统一错误 envelope，保留现有成功响应兼容性。
-- [ ] 为创建 Task、运行 Task 和 Workflow Run 增加内存/SQLite 作用域内的 Idempotency-Key 去重记录。
-- [ ] 增加稳定的分页参数和响应字段，不影响默认无分页调用。
-- [ ] 为 DSH callback 增加可选 `DSH_CALLBACK_SECRET` 的 HMAC 校验、时间戳和 nonce，开发模式保持兼容。
-- [ ] 将 Chat 和 Knowledge 的 fixture 行为包装为明确的 provider seam，返回 `source: demo`，避免假装是生产检索。
-- [ ] 测试租户越权、错误结构、重复创建和 callback 签名。
-- [ ] 运行 `python -m pytest tests/test_server_contract.py tests/test_server_security.py -q`。
-- [ ] 提交 `feat: harden reference api contracts`。
+- [x] 增加 `X-Request-ID` 生成/透传和统一错误 envelope，保留现有成功响应兼容性。
+- [x] 为创建 Task、运行 Task 和 Workflow Run 增加内存/SQLite 作用域内的 Idempotency-Key 去重记录。
+- [x] 增加稳定的分页参数和响应字段，不影响默认无分页调用。
+- [x] 为 DSH callback 增加可选 `DSH_CALLBACK_SECRET` 的 HMAC 校验、时间戳和 nonce，开发模式保持兼容。
+- [x] 将 Chat 和 Knowledge 的 fixture 行为包装为明确的 provider seam，返回 `source: demo`，避免假装是生产检索。
+- [x] 测试租户越权、错误结构、重复创建和 callback 签名。
+- [x] 运行 `python -m pytest tests/test_server_contract.py tests/test_server_security.py -q`。
+- [x] 提交 `feat: harden reference api contracts`。
 
 ### 任务 4：Python SDK
 
@@ -72,14 +72,14 @@
 - 创建：`tests/sdk_python/test_client.py`
 - 创建：`tests/sdk_python/test_extensions.py`
 
-- [ ] 实现 `DSHClient` 和 `AsyncDSHClient`，支持 base_url、api_key、tenant_id、actor_id、timeout、request_id 和自定义 headers。
-- [ ] 实现 `tasks.create/get/list/run`、`runs.get/list/wait`、`chat.send`、`knowledge.search`、`workflows.run`、`approvals.approve/reject`、`artifacts.list/get`。
-- [ ] 将 401/403/404/409/422/5xx 映射到明确的异常类并携带 request_id、status_code、details。
-- [ ] `runs.wait` 使用轮询间隔、超时和 terminal status，不无限重试；支持 callback 后读取 Artifact。
-- [ ] 提供 Protocol：`KnowledgeProvider`、`SkillProvider`、`WorkflowExecutor`、`ArtifactStore`、`ApprovalPolicy`、`EventSink`。
-- [ ] 用本地 fixture HTTP handler 测试 headers、序列化、错误映射和 wait 行为。
-- [ ] 运行 `python -m pytest tests/sdk_python -q`，并构建 wheel/sdist。
-- [ ] 提交 `feat: add python sdk`。
+- [x] 实现 `DSHClient` 和 `AsyncDSHClient`，支持 base_url、api_key、tenant_id、actor_id、timeout、request_id 和自定义 headers。
+- [x] 实现 `tasks.create/get/list/run`、`runs.get/list/wait`、`chat.send`、`knowledge.search`、`workflows.run`、`approvals.approve/reject`、`artifacts.list/get`。
+- [x] 将 401/403/404/409/422/5xx 映射到明确的异常类并携带 request_id、status_code、details。
+- [x] `runs.wait` 使用轮询间隔、超时和 terminal status，不无限重试；支持 callback 后读取 Artifact。
+- [x] 提供 Protocol：`KnowledgeProvider`、`SkillProvider`、`WorkflowExecutor`、`ArtifactStore`、`ApprovalPolicy`、`EventSink`。
+- [x] 用本地 fixture HTTP handler 测试 headers、序列化、错误映射和 wait 行为。
+- [x] 运行 `python -m pytest tests/sdk_python -q`，并构建 wheel/sdist。
+- [x] 提交 `feat: add python sdk`。
 
 ### 任务 5：TypeScript SDK
 
@@ -92,13 +92,13 @@
 - 创建：`packages/typescript/src/index.ts`
 - 创建：`packages/typescript/test/client.test.ts`
 
-- [ ] 实现基于原生 Fetch 的 `DSHClient`，支持同 Python SDK 的资源方法和请求 headers。
-- [ ] 导出资源类型、状态类型、错误类和扩展 interface。
-- [ ] 统一处理非 2xx 响应，保留 request_id 和 details。
-- [ ] `runs.wait` 支持 AbortSignal 和超时。
-- [ ] 使用 Node test runner 测试请求路径、body、headers、错误和轮询。
-- [ ] 运行 `npm install`、`npm run typecheck`、`npm test`、`npm pack --dry-run`。
-- [ ] 提交 `feat: add typescript sdk`。
+- [x] 实现基于原生 Fetch 的 `DSHClient`，支持同 Python SDK 的资源方法和请求 headers。
+- [x] 导出资源类型、状态类型、错误类和扩展 interface。
+- [x] 统一处理非 2xx 响应，保留 request_id 和 details。
+- [x] `runs.wait` 支持 AbortSignal 和超时。
+- [x] 使用 Node test runner 测试请求路径、body、headers、错误和轮询。
+- [x] 运行 `npm install`、`npm run typecheck`、`npm test`、`npm pack --dry-run`。
+- [x] 提交 `feat: add typescript sdk`。
 
 ### 任务 6：Scenario Pack manifest 和扩展示例
 
@@ -110,12 +110,12 @@
 - 创建：`docs/extensions.md`
 - 测试：`tests/test_pack_manifest.py`
 
-- [ ] 定义 pack id、版本、Skills、Knowledge Sources、Workflows、权限和 approval policy。
-- [ ] 示例展示：创建 Task、运行、等待、读取 Artifact。
-- [ ] 文档展示如何实现自定义 KnowledgeProvider 和 ArtifactStore，而不修改 SDK。
-- [ ] 用最小 YAML parser 检查 manifest 的必填字段、唯一 id 和声明的 Skill/Workflow 引用。
-- [ ] 运行 `python -m pytest tests/test_pack_manifest.py -q`。
-- [ ] 提交 `feat: add scenario pack extension examples`。
+- [x] 定义 pack id、版本、Skills、Knowledge Sources、Workflows、权限和 approval policy。
+- [x] 示例展示：创建 Task、运行、等待、读取 Artifact。
+- [x] 文档展示如何实现自定义 KnowledgeProvider 和 ArtifactStore，而不修改 SDK。
+- [x] 用最小 YAML parser 检查 manifest 的必填字段、唯一 id 和声明的 Skill/Workflow 引用。
+- [x] 运行 `python -m pytest tests/test_pack_manifest.py -q`。
+- [x] 提交 `feat: add scenario pack extension examples`。
 
 ### 任务 7：发布、CI 和开发者体验
 
@@ -128,12 +128,12 @@
 - 创建：`LICENSE`
 - 创建：`CHANGELOG.md`
 
-- [ ] CI 执行 Python compile/pytest、Python build、TypeScript typecheck/test/pack、OpenAPI 校验、Docker build。
-- [ ] Python 包配置 PyPI wheel/sdist 元数据；TypeScript 包配置 npm exports、types 和 files。
-- [ ] 根 README 加入 5 分钟自托管、Python/TypeScript 首次调用、扩展入口、架构边界和安全说明。
-- [ ] Docker 健康检查和现有 `python3 server.py --port 8766` 入口继续可用。
-- [ ] 本地执行全部检查并记录结果。
-- [ ] 提交 `chore: prepare framework release`。
+- [x] CI 执行 Python compile/pytest、Python build、TypeScript typecheck/test/pack、OpenAPI 校验、Docker build。
+- [x] Python 包配置 PyPI wheel/sdist 元数据；TypeScript 包配置 npm exports、types 和 files。
+- [x] 根 README 加入 5 分钟自托管、Python/TypeScript 首次调用、扩展入口、架构边界和安全说明。
+- [x] Docker 健康检查和现有 `python3 server.py --port 8766` 入口继续可用。
+- [x] 本地执行全部检查并记录结果。
+- [x] 提交 `chore: prepare framework release`。
 
 ### 任务 8：最终验收和推送
 

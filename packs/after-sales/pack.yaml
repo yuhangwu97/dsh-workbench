@@ -3,12 +3,20 @@ id: after-sales
 name: 售后诊断
 version: 0.1.0
 description: 从设备日志、产品手册和历史工单生成可追溯的诊断结果。
+ui:
+  color: green
 skills:
   - id: equipment-diagnosis
+    name: 设备故障诊断
+    description: 从日志、手册和历史工单生成带证据引用的诊断报告。
+    trust: verified
     version: 1.3.0
     entrypoint: examples.equipment_diagnosis:run
-    allowed_tools: [kb.search, ticket.read, device.status]
+    allowed_tools: [kb.search, ticket.read, device.status, maintenance.action]
   - id: fault-code-analysis
+    name: 故障码分析
+    description: 解释设备故障码并匹配产品手册中的检查步骤。
+    trust: verified
     version: 1.0.0
     entrypoint: examples.fault_code:run
     allowed_tools: [kb.search]
@@ -21,6 +29,8 @@ knowledge_sources:
     access: [after-sales]
 workflows:
   - id: diagnose-equipment-v2
+    name: 售后诊断 v2
+    status: published
     skill_id: equipment-diagnosis
     steps:
       - id: retrieve-evidence

@@ -3,8 +3,13 @@ id: engineering
 name: 研发助手
 version: 0.1.0
 description: 把 Issue、代码上下文和复现信息组织成可执行的工程调查。
+ui:
+  color: blue
 skills:
   - id: issue-investigation
+    name: Issue 调查
+    description: 整理代码上下文、影响范围和复现路径，形成工程调查记录。
+    trust: verified
     version: 0.8.2
     entrypoint: examples.issue_investigation:run
     allowed_tools: [repo.read, issue.read, search]
@@ -14,6 +19,8 @@ knowledge_sources:
     access: [engineering]
 workflows:
   - id: issue-to-patch-plan
+    name: Issue to Patch Plan
+    status: published
     skill_id: issue-investigation
     steps:
       - id: gather-context

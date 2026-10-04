@@ -130,7 +130,7 @@ POST   /api/v1/tool-approvals/:id/approve
 POST   /api/v1/tool-approvals/:id/reject
 ```
 
-控制台已通过 `app.js` 读取 dashboard、runtime、knowledge、workflow、approval、run 和 Artifact API；没有 API 时才退回本地 fixture，用于离线展示。
+控制台通过 `app.js` 读取 `/api/v1/dashboard`、`/api/v1/runtime`、`/api/v1/scenario-packs`、`/api/v1/skills` 以及 Knowledge、Workflow、Approval、Run 和 Artifact API。Pack、Skill 和 Workflow 的业务数据由 manifest/API 注入，前端只保留颜色、状态样式等展示映射。API 不可用时清空动态数据并显示明确的 Offline 状态，不回退到本地任务 fixture。
 
 ## 前端入口与后端接口映射
 

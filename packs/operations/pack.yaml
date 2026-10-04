@@ -3,8 +3,13 @@ id: operations
 name: 运营告警
 version: 0.1.0
 description: 聚合告警、匹配 Runbook，并在升级前保留影响分析和审批记录。
+ui:
+  color: orange
 skills:
   - id: alert-triage
+    name: 告警处置
+    description: 聚合重复告警，匹配 Runbook 并给出升级建议。
+    trust: org
     version: 2.1.0
     entrypoint: examples.alert_triage:run
     allowed_tools: [alert.read, runbook.search]
@@ -14,6 +19,8 @@ knowledge_sources:
     access: [operations]
 workflows:
   - id: alert-to-escalation
+    name: Alert to Escalation
+    status: published
     skill_id: alert-triage
     steps:
       - id: group-alerts

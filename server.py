@@ -17,6 +17,8 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
+import yaml
+
 from runtime.dsh_harness import HarnessResult
 from runtime.dsh_runtime import DshRuntime, RuntimeUnavailableError
 from runtime.knowledge import KnowledgeIndex
@@ -43,16 +45,81 @@ RUN_SEMAPHORE = threading.BoundedSemaphore(MAX_CONCURRENCY)
 KNOWLEDGE_INDEX = KnowledgeIndex.from_env()
 TOOL_GATEWAY = ToolGateway()
 
-PACKS = [
-    {"id": "after-sales", "name": "售后诊断", "color": "green", "status": "enabled", "skills": 8, "workflows": 3, "knowledge_bases": 4, "description": "面向售后团队的设备问题定位、证据收集和维修建议。"},
-    {"id": "engineering", "name": "研发助手", "color": "blue", "status": "enabled", "skills": 6, "workflows": 4, "knowledge_bases": 2, "description": "面向研发团队的 Issue 调查、变更分析和测试计划。"},
-    {"id": "operations", "name": "运营告警", "color": "orange", "status": "enabled", "skills": 5, "workflows": 2, "knowledge_bases": 3, "description": "面向运营团队的告警聚合、影响分析和升级流程。"},
-]
-SKILLS = [
-    {"id": "equipment-diagnosis", "name": "设备故障诊断", "pack_id": "after-sales", "version": "1.4.0", "trust": "verified", "dependencies": ["kb.search", "ticket.read", "device.status", "maintenance.action"]},
-    {"id": "issue-investigation", "name": "Issue 调查", "pack_id": "engineering", "version": "0.8.2", "trust": "verified", "dependencies": ["repo.read", "issue.read", "search"]},
-    {"id": "alert-triage", "name": "告警处置", "pack_id": "operations", "version": "2.1.0", "trust": "org", "dependencies": ["alert.read", "runbook.search"]},
-]
+def load_scenario_catalog(pack_root: Path = ROOT / "packs") -> tuple[list[dict], list[dict]]:
+    """Load the public Pack and Skill catalog from versioned manifests."""
+    packs: list[dict] = []
+    skills: list[dict] = []
+    for manifest_path in sorted(pack_root.glob("*/pack.yaml")):
+        try:
+            manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8")) or {}
+        except (OSError, yaml.YAMLError):
+            continue
+        if not isinstance(manifest, dict) or not manifest.get("id") or not manifest.get("name"):
+            continue
+        pack_id = str(manifest["id"])
+        manifest_skills = [item for item in manifest.get("skills", []) if isinstance(item, dict) and item.get("id")]
+        manifest_workflows = [item for item in manifest.get("workflows", []) if isinstance(item, dict) and item.get("id")]
+        manifest_sources = [item for item in manifest.get("knowledge_sources", []) if isinstance(item, dict) and item.get("id")]
+        ui = manifest.get("ui") if isinstance(manifest.get("ui"), dict) else {}
+        pack = {
+            "id": pack_id,
+            "name": str(manifest["name"]),
+            "color": str(ui.get("color", "green")),
+            "status": str(manifest.get("status", "enabled")),
+            "version": str(manifest.get("version", "")),
+            "skills": len(manifest_skills),
+            "workflows": len(manifest_workflows),
+            "knowledge_bases": len(manifest_sources),
+            "description": str(manifest.get("description", "")),
+            "manifest": str(manifest_path.relative_to(ROOT)),
+        }
+        packs.append(pack)
+        for item in manifest_skills:
+            skill_ui = item.get("ui") if isinstance(item.get("ui"), dict) else {}
+            skills.append({
+                "id": str(item["id"]),
+                "name": str(item.get("name", item["id"])),
+                "description": str(item.get("description", "")),
+                "pack_id": pack_id,
+                "version": str(item.get("version", manifest.get("version", ""))),
+                "trust": str(item.get("trust", "verified")),
+                "dependencies": [str(tool) for tool in item.get("allowed_tools", []) if str(tool).strip()],
+                "entrypoint": str(item.get("entrypoint", "")),
+                "color": str(skill_ui.get("color", ui.get("color", "green"))),
+            })
+    return packs, skills
+
+
+def load_workflow_catalog(pack_root: Path = ROOT / "packs") -> list[dict]:
+    """Load workflow registrations from the same Pack manifests as Packs and Skills."""
+    workflows: list[dict] = []
+    for manifest_path in sorted(pack_root.glob("*/pack.yaml")):
+        try:
+            manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8")) or {}
+        except (OSError, yaml.YAMLError):
+            continue
+        if not isinstance(manifest, dict) or not manifest.get("id"):
+            continue
+        for item in manifest.get("workflows", []):
+            if not isinstance(item, dict) or not item.get("id"):
+                continue
+            raw_steps = item.get("steps", [])
+            step_labels = [str(step.get("id", step.get("type", "step"))) for step in raw_steps if isinstance(step, dict)] if isinstance(raw_steps, list) else []
+            workflows.append({
+                "id": str(item["id"]),
+                "name": str(item.get("name", item["id"])),
+                "pack_id": str(manifest["id"]),
+                "skill_id": str(item.get("skill_id", "")),
+                "steps": len(raw_steps) if isinstance(raw_steps, list) else int(raw_steps or 0),
+                "step_labels": step_labels,
+                "status": str(item.get("status", "published")),
+                "manifest": str(manifest_path.relative_to(ROOT)),
+            })
+    return workflows
+
+
+PACKS, SKILLS = load_scenario_catalog()
+WORKFLOWS = load_workflow_catalog()
 SEED_TASKS = [
     {"id": "TK-20261004-0021", "name": "设备 #3021 故障诊断", "pack_id": "after-sales", "skill_id": "equipment-diagnosis", "status": "running", "status_label": "进行中", "updated": "2 分钟前", "copy": "已找到 3 条相关历史案例，建议检查冷却泵电源和过滤器状态。"},
     {"id": "TK-20261004-0018", "name": "RemoteHelpDesk #1842", "pack_id": "engineering", "skill_id": "issue-investigation", "status": "review", "status_label": "待确认", "updated": "12 分钟前", "copy": "已整理代码上下文和复现路径，建议先确认 API 兼容性，再进入修改计划。"},
@@ -112,11 +179,7 @@ def seed_state() -> dict:
         "pack_evaluations": [],
         "events": [],
         "pack_registry": load_registry(),
-        "workflows": [
-            {"id": "diagnose-equipment-v2", "name": "售后诊断 v2", "pack_id": "after-sales", "steps": 5, "status": "published"},
-            {"id": "issue-to-patch-plan", "name": "Issue to Patch Plan", "pack_id": "engineering", "steps": 4, "status": "published"},
-            {"id": "alert-to-escalation", "name": "Alert to Escalation", "pack_id": "operations", "steps": 4, "status": "published"},
-        ],
+        "workflows": [item.copy() for item in WORKFLOWS],
     }
 
 def read_raw_state() -> dict:
@@ -162,6 +225,9 @@ def load_state() -> dict:
             if key not in state or not isinstance(state[key], list):
                 state[key] = seed[key]
                 changed = True
+        if state.get("workflows") != WORKFLOWS:
+            state["workflows"] = [item.copy() for item in WORKFLOWS]
+            changed = True
         if "audit" not in state:
             state["audit"] = seed["audit"]
             changed = True

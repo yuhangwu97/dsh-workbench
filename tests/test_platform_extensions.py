@@ -63,7 +63,7 @@ def test_hs256_claims_are_verified():
 def test_http_ingestion_citations_and_run_controls(tmp_path):
     port = _port()
     env = os.environ.copy()
-    env.update({"PYTHONPATH": str(ROOT), "WORKBENCH_STORAGE": "json", "WORKBENCH_STATE_PATH": str(tmp_path / "state.json")})
+    env.update({"PYTHONPATH": str(ROOT), "WORKBENCH_STORAGE": "json", "DSH_RUNTIME_MODE": "demo", "WORKBENCH_STATE_PATH": str(tmp_path / "state.json")})
     process = subprocess.Popen([sys.executable, "server.py", "--host", "127.0.0.1", "--port", str(port)], cwd=ROOT, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     base = f"http://127.0.0.1:{port}"
     try:
